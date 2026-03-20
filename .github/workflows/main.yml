@@ -21,11 +21,12 @@ jobs:
         run: |
           go mod tidy
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o waitdash.exe .
+          zip waitdash-windows.zip waitdash.exe servers.json
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
           name: WaitDash Latest Build
-          files: waitdash.exe
+          files: waitdash-windows.zip
           make_latest: true
