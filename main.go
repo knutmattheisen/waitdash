@@ -29,7 +29,7 @@ type ServerConfig struct {
 	Host     string `json:"host"`
 	Port     int    `json:"port"`
 	Instance string `json:"instance"`
-	AuthMode string `json:"auth_mode"` // "windows" or "sql"
+	AuthMode string `json:"auth_mode"`
 	User     string `json:"user"`
 	Password string `json:"password"`
 }
@@ -41,28 +41,21 @@ type Config struct {
 	RefreshSeconds int            `json:"refresh_seconds"`
 }
 
-var globalConfig Config
+var (
+	globalConfig   Config
+	configFilePath = "servers.json"
+	configMu       sync.Mutex
+)
 
 func loadConfig() {
-	data, err := os.ReadFile("servers.json")
+	data, err := os.ReadFile(configFilePath)
 	if err != nil {
-		log.Println("No servers.json found, using defaults")
-		globalConfig = Config{
-			ListenPort:     9090,
-			RefreshSeconds: 5,
-			Servers: []ServerConfig{
-				{
-					Name:     "Local Default",
-					Host:     "localhost",
-					Port:     1433,
-					AuthMode: "windows",
-				},
-			},
-		}
+		globalConfig = Config{ListenPort: 9090, RefreshSeconds: 5, Servers: []ServerConfig{}}
 		return
 	}
 	if err := json.Unmarshal(data, &globalConfig); err != nil {
-		log.Fatalf("Invalid servers.json: %v", err)
+		globalConfig = Config{ListenPort: 9090, RefreshSeconds: 5}
+		return
 	}
 	if globalConfig.ListenPort == 0 {
 		globalConfig.ListenPort = 9090
@@ -72,48 +65,18 @@ func loadConfig() {
 	}
 }
 
-// ─────────────────────────────────────────────
-// Wait stats exclusion list
-// ─────────────────────────────────────────────
-
-var excludedWaits = map[string]bool{
-	"SLEEP_TASK":                      true,
-	"BROKER_TASK_STOP":                true,
-	"BROKER_TO_FLUSH":                 true,
-	"SQLTRACE_BUFFER_FLUSH":           true,
-	"CLR_AUTO_EVENT":                  true,
-	"CLR_MANUAL_EVENT":                true,
-	"LAZYWRITER_SLEEP":                true,
-	"REQUEST_FOR_DEADLOCK_SEARCH":     true,
-	"XE_TIMER_EVENT":                  true,
-	"XE_DISPATCHER_WAIT":              true,
-	"FT_IFTS_SCHEDULER_IDLE_WAIT":     true,
-	"DIRTY_PAGE_POLL":                 true,
-	"HADR_FILESTREAM_IOMGR_IOCOMPLETION": true,
-	"SP_SERVER_DIAGNOSTICS_SLEEP":     true,
-	"WAIT_XTP_OFFLINE_CKPT_NEW_LOG":   true,
-	"DISPATCHER_QUEUE_SEMAPHORE":      true,
-	"BROKER_EVENTHANDLER":             true,
-	"CHECKPOINT_QUEUE":                true,
-	"DBMIRROR_EVENTS_QUEUE":           true,
-	"SQLTRACE_INCREMENTAL_FLUSH_SLEEP": true,
-	"ONDEMAND_TASK_MANAGER":           true,
-	"SERVER_IDLE_CHECK":               true,
-	"SLEEP_DBSTARTUP":                 true,
-	"SLEEP_DCOMSTARTUP":               true,
-	"SLEEP_MASTERDBREADY":             true,
-	"SLEEP_MASTERMDREADY":             true,
-	"SLEEP_MASTERUPGRADED":            true,
-	"SLEEP_MSDBSTARTUP":               true,
-	"SLEEP_SYSTEMTASK":                true,
-	"SLEEP_TEMPDBSTARTUP":             true,
-	"SNI_HTTP_ACCEPT":                 true,
-	"WAITFOR":                         true,
-	"XE_DISPATCHER_JOIN":              true,
+func saveConfig() error {
+	configMu.Lock()
+	defer configMu.Unlock()
+	data, err := json.MarshalIndent(globalConfig, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(configFilePath, data, 0644)
 }
 
 // ─────────────────────────────────────────────
-// Wait categories
+// Wait category
 // ─────────────────────────────────────────────
 
 func categorizeWait(waitType string) string {
@@ -125,13 +88,9 @@ func categorizeWait(waitType string) string {
 		return "I/O"
 	case strings.HasPrefix(wt, "PAGELATCH_"):
 		return "Memory/Latch"
-	case strings.HasPrefix(wt, "WRITELOG"):
+	case wt == "WRITELOG" || strings.HasPrefix(wt, "IO_COMPLETION") || strings.HasPrefix(wt, "ASYNC_IO_COMPLETION"):
 		return "I/O"
-	case strings.HasPrefix(wt, "IO_COMPLETION"):
-		return "I/O"
-	case strings.HasPrefix(wt, "ASYNC_IO_COMPLETION"):
-		return "I/O"
-	case wt == "SOS_SCHEDULER_YIELD":
+	case wt == "SOS_SCHEDULER_YIELD" || wt == "THREADPOOL":
 		return "CPU"
 	case wt == "CXPACKET" || wt == "CXCONSUMER" || wt == "CXROWSET_SYNC":
 		return "Parallelism"
@@ -139,14 +98,8 @@ func categorizeWait(waitType string) string {
 		return "Memory"
 	case strings.HasPrefix(wt, "ASYNC_NETWORK_IO") || wt == "NET_WAITFOR_PACKET":
 		return "Network"
-	case wt == "THREADPOOL":
-		return "CPU"
-	case strings.HasPrefix(wt, "HADR_"):
+	case strings.HasPrefix(wt, "HADR_") || strings.HasPrefix(wt, "DBMIRROR"):
 		return "HA/AG"
-	case strings.HasPrefix(wt, "DBMIRROR"):
-		return "HA/AG"
-	case strings.HasPrefix(wt, "CLR_"):
-		return "CLR"
 	default:
 		return "Other"
 	}
@@ -157,37 +110,37 @@ func categorizeWait(waitType string) string {
 // ─────────────────────────────────────────────
 
 type WaitStat struct {
-	WaitType           string  `json:"wait_type"`
-	WaitingTasksCount  int64   `json:"waiting_tasks_count"`
-	WaitTimeMs         int64   `json:"wait_time_ms"`
-	MaxWaitTimeMs      int64   `json:"max_wait_time_ms"`
-	SignalWaitTimeMs   int64   `json:"signal_wait_time_ms"`
-	ResourceWaitMs     int64   `json:"resource_wait_ms"`
-	AvgWaitMs          float64 `json:"avg_wait_ms"`
-	PercentOfTotal     float64 `json:"percent_of_total"`
-	Category           string  `json:"category"`
-	DeltaWaitTimeMs    int64   `json:"delta_wait_time_ms"`
-	DeltaTasksCount    int64   `json:"delta_tasks_count"`
+	WaitType          string  `json:"wait_type"`
+	WaitingTasksCount int64   `json:"waiting_tasks_count"`
+	WaitTimeMs        int64   `json:"wait_time_ms"`
+	MaxWaitTimeMs     int64   `json:"max_wait_time_ms"`
+	SignalWaitTimeMs  int64   `json:"signal_wait_time_ms"`
+	ResourceWaitMs    int64   `json:"resource_wait_ms"`
+	AvgWaitMs         float64 `json:"avg_wait_ms"`
+	PercentOfTotal    float64 `json:"percent_of_total"`
+	Category          string  `json:"category"`
+	DeltaWaitTimeMs   int64   `json:"delta_wait_time_ms"`
+	DeltaTasksCount   int64   `json:"delta_tasks_count"`
 }
 
 type ActiveRequest struct {
-	SessionID        int    `json:"session_id"`
-	Status           string `json:"status"`
-	Command          string `json:"command"`
-	WaitType         string `json:"wait_type"`
-	WaitTimeMs       int64  `json:"wait_time_ms"`
-	WaitResource     string `json:"wait_resource"`
-	BlockingSessionID int   `json:"blocking_session_id"`
-	CPUTime          int64  `json:"cpu_time"`
-	LogicalReads     int64  `json:"logical_reads"`
-	Reads            int64  `json:"reads"`
-	Writes           int64  `json:"writes"`
-	TotalElapsedMs   int64  `json:"total_elapsed_ms"`
-	DatabaseName     string `json:"database_name"`
-	HostName         string `json:"host_name"`
-	LoginName        string `json:"login_name"`
-	ProgramName      string `json:"program_name"`
-	SqlText          string `json:"sql_text"`
+	SessionID         int    `json:"session_id"`
+	Status            string `json:"status"`
+	Command           string `json:"command"`
+	WaitType          string `json:"wait_type"`
+	WaitTimeMs        int64  `json:"wait_time_ms"`
+	WaitResource      string `json:"wait_resource"`
+	BlockingSessionID int    `json:"blocking_session_id"`
+	CPUTime           int64  `json:"cpu_time"`
+	LogicalReads      int64  `json:"logical_reads"`
+	Reads             int64  `json:"reads"`
+	Writes            int64  `json:"writes"`
+	TotalElapsedMs    int64  `json:"total_elapsed_ms"`
+	DatabaseName      string `json:"database_name"`
+	HostName          string `json:"host_name"`
+	LoginName         string `json:"login_name"`
+	ProgramName       string `json:"program_name"`
+	SqlText           string `json:"sql_text"`
 }
 
 type BlockingChain struct {
@@ -201,33 +154,40 @@ type BlockingChain struct {
 }
 
 type Overview struct {
-	ServerName          string    `json:"server_name"`
-	SQLVersion          string    `json:"sql_version"`
-	StartTime           time.Time `json:"start_time"`
-	CurrentTime         time.Time `json:"current_time"`
-	UptimeHours         float64   `json:"uptime_hours"`
-	SignalWaitPct        float64   `json:"signal_wait_pct"`
-	TotalWaitMs         int64     `json:"total_wait_ms"`
-	SignalWaitMs        int64     `json:"signal_wait_ms"`
-	ResourceWaitMs      int64     `json:"resource_wait_ms"`
-	BlockedCount        int       `json:"blocked_count"`
-	ActiveRequestCount  int       `json:"active_request_count"`
-	TopWaitCategory     string    `json:"top_wait_category"`
-	CPUPressure         bool      `json:"cpu_pressure"`
-	AvailableServers    []string  `json:"available_servers"`
-	CurrentServer       string    `json:"current_server"`
+	ServerName        string    `json:"server_name"`
+	SQLVersion        string    `json:"sql_version"`
+	Edition           string    `json:"edition"`
+	ProductLevel      string    `json:"product_level"`
+	ProductUpdate     string    `json:"product_update"`
+	LicenseType       string    `json:"license_type"`
+	PhysicalMemGB     int       `json:"physical_mem_gb"`
+	LogicalCPUs       int       `json:"logical_cpus"`
+	MaxServerMemMB    int64     `json:"max_server_mem_mb"`
+	StartTime         time.Time `json:"start_time"`
+	CurrentTime       time.Time `json:"current_time"`
+	UptimeHours       float64   `json:"uptime_hours"`
+	SignalWaitPct     float64   `json:"signal_wait_pct"`
+	TotalWaitMs       int64     `json:"total_wait_ms"`
+	SignalWaitMs      int64     `json:"signal_wait_ms"`
+	ResourceWaitMs    int64     `json:"resource_wait_ms"`
+	BlockedCount      int       `json:"blocked_count"`
+	ActiveRequestCount int      `json:"active_request_count"`
+	TopWaitCategory   string    `json:"top_wait_category"`
+	CPUPressure       bool      `json:"cpu_pressure"`
+	HealthStatus      string    `json:"health_status"`
+	AvailableServers  []string  `json:"available_servers"`
+	CurrentServer     string    `json:"current_server"`
 }
 
 type Recommendation struct {
-	Severity string `json:"severity"` // "high", "medium", "info"
+	Severity string `json:"severity"`
 	Category string `json:"category"`
 	Message  string `json:"message"`
 }
 
 type Deadlock struct {
-	Timestamp   string `json:"timestamp"`
-	VictimSPID  string `json:"victim_spid"`
-	XMLPreview  string `json:"xml_preview"`
+	Timestamp  string `json:"timestamp"`
+	XMLPreview string `json:"xml_preview"`
 }
 
 // ─────────────────────────────────────────────
@@ -237,18 +197,17 @@ type Deadlock struct {
 type WaitSnapshot map[string]WaitStat
 
 type ServerState struct {
-	mu            sync.Mutex
-	db            *sql.DB
-	prevSnapshot  WaitSnapshot
-	prevCheckTime time.Time
-	history       []WaitSnapshot
-	config        ServerConfig
+	mu           sync.Mutex
+	db           *sql.DB
+	prevSnapshot WaitSnapshot
+	history      []WaitSnapshot
+	config       ServerConfig
 }
 
 var (
-	stateMu       sync.RWMutex
-	serverStates  = map[string]*ServerState{}
-	activeServer  string
+	stateMu      sync.RWMutex
+	serverStates = map[string]*ServerState{}
+	activeServer string
 )
 
 // ─────────────────────────────────────────────
@@ -264,15 +223,14 @@ func buildConnString(sc ServerConfig) string {
 	if port == 0 {
 		port = 1433
 	}
-
 	if sc.AuthMode == "windows" {
 		return fmt.Sprintf(
-			"sqlserver://%s:%d?database=master&trusted_connection=yes&app+name=WaitDash",
+			"sqlserver://%s:%d?database=master&trusted_connection=yes&encrypt=true&TrustServerCertificate=true&app+name=WaitDash",
 			host, port,
 		)
 	}
 	return fmt.Sprintf(
-		"sqlserver://%s:%s@%s:%d?database=master&app+name=WaitDash",
+		"sqlserver://%s:%s@%s:%d?database=master&encrypt=true&TrustServerCertificate=true&app+name=WaitDash",
 		sc.User, sc.Password, host, port,
 	)
 }
@@ -284,7 +242,6 @@ func getOrCreateState(serverName string) (*ServerState, error) {
 	if ok {
 		return st, nil
 	}
-
 	var sc *ServerConfig
 	for i := range globalConfig.Servers {
 		if globalConfig.Servers[i].Name == serverName {
@@ -295,7 +252,6 @@ func getOrCreateState(serverName string) (*ServerState, error) {
 	if sc == nil {
 		return nil, fmt.Errorf("server not found: %s", serverName)
 	}
-
 	connStr := buildConnString(*sc)
 	db, err := sql.Open("sqlserver", connStr)
 	if err != nil {
@@ -304,18 +260,14 @@ func getOrCreateState(serverName string) (*ServerState, error) {
 	db.SetMaxOpenConns(5)
 	db.SetMaxIdleConns(2)
 	db.SetConnMaxLifetime(5 * time.Minute)
-
 	if err := db.Ping(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("cannot connect to %s: %v", serverName, err)
 	}
-
 	st = &ServerState{db: db, config: *sc}
-
 	stateMu.Lock()
 	serverStates[serverName] = st
 	stateMu.Unlock()
-
 	return st, nil
 }
 
@@ -325,7 +277,7 @@ func currentState() (*ServerState, error) {
 	stateMu.RUnlock()
 	if name == "" {
 		if len(globalConfig.Servers) == 0 {
-			return nil, fmt.Errorf("no servers configured")
+			return nil, fmt.Errorf("no_servers")
 		}
 		name = globalConfig.Servers[0].Name
 		stateMu.Lock()
@@ -340,12 +292,7 @@ func currentState() (*ServerState, error) {
 // ─────────────────────────────────────────────
 
 const queryWaits = `
-SELECT
-    wait_type,
-    waiting_tasks_count,
-    wait_time_ms,
-    max_wait_time_ms,
-    signal_wait_time_ms
+SELECT wait_type, waiting_tasks_count, wait_time_ms, max_wait_time_ms, signal_wait_time_ms
 FROM sys.dm_os_wait_stats
 WHERE wait_type NOT IN (
     'SLEEP_TASK','BROKER_TASK_STOP','BROKER_TO_FLUSH','SQLTRACE_BUFFER_FLUSH',
@@ -362,86 +309,78 @@ WHERE wait_type NOT IN (
     'SNI_HTTP_ACCEPT','WAITFOR','XE_DISPATCHER_JOIN'
 )
 AND wait_time_ms > 0
-ORDER BY wait_time_ms DESC
-`
+ORDER BY wait_time_ms DESC`
 
 const queryActive = `
 SELECT
-    r.session_id,
-    r.status,
-    r.command,
+    r.session_id, r.status, r.command,
     ISNULL(r.wait_type,'') AS wait_type,
     r.wait_time,
     ISNULL(r.wait_resource,'') AS wait_resource,
     ISNULL(r.blocking_session_id,0) AS blocking_session_id,
-    r.cpu_time,
-    r.logical_reads,
-    r.reads,
-    r.writes,
-    r.total_elapsed_time,
+    r.cpu_time, r.logical_reads, r.reads, r.writes, r.total_elapsed_time,
     ISNULL(DB_NAME(r.database_id),'') AS database_name,
     ISNULL(s.host_name,'') AS host_name,
     ISNULL(s.login_name,'') AS login_name,
     ISNULL(s.program_name,'') AS program_name,
-    ISNULL(SUBSTRING(
-        st.text,
+    ISNULL(SUBSTRING(ISNULL(st.text,''),
         (r.statement_start_offset/2)+1,
         CASE WHEN r.statement_end_offset=-1
-             THEN LEN(CONVERT(nvarchar(max),st.text))*2
+             THEN LEN(CONVERT(nvarchar(max),ISNULL(st.text,'')))*2
              ELSE r.statement_end_offset
-        END - r.statement_start_offset)/2+1, 2000), '') AS sql_text
+        END - r.statement_start_offset)/2+1, 500),'') AS sql_text
 FROM sys.dm_exec_requests r
 JOIN sys.dm_exec_sessions s ON r.session_id = s.session_id
 OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) st
 WHERE r.session_id != @@SPID
   AND s.is_user_process = 1
-  AND r.status != 'background'
-ORDER BY r.total_elapsed_time DESC
-`
+  AND r.status NOT IN ('background','sleeping')
+  AND ISNULL(s.program_name,'') NOT LIKE '%WaitDash%'
+ORDER BY r.total_elapsed_time DESC`
 
-const queryOverview = `
+const queryServerInfo = `
 SELECT
-    @@SERVERNAME AS server_name,
-    @@VERSION AS sql_version,
+    CAST(SERVERPROPERTY('ServerName') AS nvarchar(256)),
+    @@VERSION,
+    CAST(SERVERPROPERTY('Edition') AS nvarchar(256)),
+    CAST(SERVERPROPERTY('ProductLevel') AS nvarchar(50)),
+    CAST(ISNULL(SERVERPROPERTY('ProductUpdateLevel'),'') AS nvarchar(50)),
+    CAST(ISNULL(SERVERPROPERTY('LicenseType'),'Disabled') AS nvarchar(50)),
+    CAST(physical_memory_kb/1024/1024 AS int),
+    cpu_count,
     sqlserver_start_time,
-    GETDATE() AS current_time
-FROM sys.dm_os_sys_info
-`
+    GETDATE()
+FROM sys.dm_os_sys_info`
 
 const queryBlocking = `
 SELECT
-    r.session_id AS blocked_session_id,
-    r.blocking_session_id,
-    ISNULL(r.wait_type,'') AS wait_type,
-    ISNULL(r.wait_resource,'') AS wait_resource,
-    r.wait_time AS wait_time_ms,
-    ISNULL(SUBSTRING(st.text,1,500),'') AS blocked_sql,
-    ISNULL(SUBSTRING(st2.text,1,500),'') AS blocking_sql
+    r.session_id, r.blocking_session_id,
+    ISNULL(r.wait_type,''), ISNULL(r.wait_resource,''),
+    r.wait_time,
+    ISNULL(SUBSTRING(ISNULL(st.text,''),1,500),''),
+    ISNULL(SUBSTRING(ISNULL(st2.text,''),1,500),'')
 FROM sys.dm_exec_requests r
 LEFT JOIN sys.dm_exec_requests r2 ON r.blocking_session_id = r2.session_id
 OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) st
 OUTER APPLY sys.dm_exec_sql_text(r2.sql_handle) st2
 WHERE r.blocking_session_id > 0
-ORDER BY r.wait_time DESC
-`
+ORDER BY r.wait_time DESC`
 
 const queryDeadlocks = `
 SELECT TOP 20
-    xdr.value('@timestamp','datetime') AS deadlock_time,
-    CAST(xdr.query('.') AS nvarchar(max)) AS deadlock_xml
+    xdr.value('@timestamp','datetime'),
+    CAST(xdr.query('.') AS nvarchar(max))
 FROM (
     SELECT CAST(target_data AS xml) AS target_data
     FROM sys.dm_xe_session_targets t
     JOIN sys.dm_xe_sessions s ON s.address = t.event_session_address
-    WHERE s.name = 'system_health'
-      AND t.target_name = 'ring_buffer'
-) AS d
-CROSS APPLY target_data.nodes('//RingBufferTarget/event[@name="xml_deadlock_report"]') AS XEventData(xdr)
-ORDER BY deadlock_time DESC
-`
+    WHERE s.name='system_health' AND t.target_name='ring_buffer'
+) d
+CROSS APPLY target_data.nodes('//RingBufferTarget/event[@name="xml_deadlock_report"]') AS x(xdr)
+ORDER BY xdr.value('@timestamp','datetime') DESC`
 
 // ─────────────────────────────────────────────
-// Data fetch helpers
+// Fetch helpers
 // ─────────────────────────────────────────────
 
 func fetchWaits(st *ServerState) ([]WaitStat, error) {
@@ -469,21 +408,18 @@ func fetchWaits(st *ServerState) ([]WaitStat, error) {
 		current[w.WaitType] = w
 	}
 
-	// Compute totals for percent
 	var totalMs int64
 	for _, w := range current {
 		totalMs += w.WaitTimeMs
 	}
 
-	// Compute deltas
 	var result []WaitStat
 	for wt, w := range current {
 		if totalMs > 0 {
 			w.PercentOfTotal = float64(w.WaitTimeMs) * 100.0 / float64(totalMs)
 		}
-		if prev, ok := st.prevSnapshot[wt]; ok {
-			// Detect reset: if current < prev, skip delta
-			if w.WaitTimeMs >= prev.WaitTimeMs {
+		if st.prevSnapshot != nil {
+			if prev, ok := st.prevSnapshot[wt]; ok && w.WaitTimeMs >= prev.WaitTimeMs {
 				w.DeltaWaitTimeMs = w.WaitTimeMs - prev.WaitTimeMs
 				w.DeltaTasksCount = w.WaitingTasksCount - prev.WaitingTasksCount
 			}
@@ -491,24 +427,18 @@ func fetchWaits(st *ServerState) ([]WaitStat, error) {
 		result = append(result, w)
 	}
 
-	// Save snapshot for next delta
 	st.prevSnapshot = current
-	st.prevCheckTime = time.Now()
-
-	// Keep history (max 100)
 	st.history = append(st.history, current)
 	if len(st.history) > 100 {
 		st.history = st.history[1:]
 	}
 
-	// Sort by delta desc, then cumulative desc
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].DeltaWaitTimeMs != result[j].DeltaWaitTimeMs {
 			return result[i].DeltaWaitTimeMs > result[j].DeltaWaitTimeMs
 		}
 		return result[i].WaitTimeMs > result[j].WaitTimeMs
 	})
-
 	return result, nil
 }
 
@@ -518,7 +448,6 @@ func fetchActive(st *ServerState) ([]ActiveRequest, error) {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var result []ActiveRequest
 	for rows.Next() {
 		var r ActiveRequest
@@ -532,33 +461,38 @@ func fetchActive(st *ServerState) ([]ActiveRequest, error) {
 		); err != nil {
 			continue
 		}
-		// Filter out our own monitoring session
-		if r.ProgramName == "WaitDash" {
-			continue
-		}
 		result = append(result, r)
 	}
 	return result, nil
 }
 
 func fetchOverview(st *ServerState, waits []WaitStat, active []ActiveRequest) (Overview, error) {
-	row := st.db.QueryRow(queryOverview)
 	var ov Overview
-	var startTime time.Time
-	var currentTime time.Time
-	if err := row.Scan(&ov.ServerName, &ov.SQLVersion, &startTime, &currentTime); err != nil {
+	row := st.db.QueryRow(queryServerInfo)
+	if err := row.Scan(
+		&ov.ServerName, &ov.SQLVersion, &ov.Edition,
+		&ov.ProductLevel, &ov.ProductUpdate, &ov.LicenseType,
+		&ov.PhysicalMemGB, &ov.LogicalCPUs,
+		&ov.StartTime, &ov.CurrentTime,
+	); err != nil {
 		return ov, err
 	}
-	ov.StartTime = startTime
-	ov.CurrentTime = currentTime
-	ov.UptimeHours = currentTime.Sub(startTime).Hours()
+	ov.UptimeHours = ov.CurrentTime.Sub(ov.StartTime).Hours()
+
+	// Max server memory
+	var maxMem int64
+	if err := st.db.QueryRow(`SELECT CAST(value_in_use AS bigint) FROM sys.configurations WHERE name='max server memory (MB)'`).Scan(&maxMem); err == nil {
+		ov.MaxServerMemMB = maxMem
+	}
 
 	var totalWait, totalSignal int64
 	catTotals := map[string]int64{}
 	for _, w := range waits {
 		totalWait += w.WaitTimeMs
 		totalSignal += w.SignalWaitTimeMs
-		catTotals[w.Category] += w.DeltaWaitTimeMs
+		if w.DeltaWaitTimeMs > 0 {
+			catTotals[w.Category] += w.DeltaWaitTimeMs
+		}
 	}
 	ov.TotalWaitMs = totalWait
 	ov.SignalWaitMs = totalSignal
@@ -568,7 +502,6 @@ func fetchOverview(st *ServerState, waits []WaitStat, active []ActiveRequest) (O
 	}
 	ov.CPUPressure = ov.SignalWaitPct > 25
 
-	// Top category by delta
 	var topCat string
 	var topVal int64
 	for cat, val := range catTotals {
@@ -578,23 +511,30 @@ func fetchOverview(st *ServerState, waits []WaitStat, active []ActiveRequest) (O
 		}
 	}
 	ov.TopWaitCategory = topCat
+	if ov.TopWaitCategory == "" {
+		ov.TopWaitCategory = "None"
+	}
 
-	blockedCount := 0
 	for _, r := range active {
 		if r.BlockingSessionID > 0 {
-			blockedCount++
+			ov.BlockedCount++
 		}
 	}
-	ov.BlockedCount = blockedCount
 	ov.ActiveRequestCount = len(active)
 
-	var serverNames []string
-	for _, s := range globalConfig.Servers {
-		serverNames = append(serverNames, s.Name)
+	switch {
+	case ov.BlockedCount > 0 || ov.CPUPressure:
+		ov.HealthStatus = "red"
+	case ov.SignalWaitPct > 15 || ov.ActiveRequestCount > 20:
+		ov.HealthStatus = "yellow"
+	default:
+		ov.HealthStatus = "green"
 	}
-	ov.AvailableServers = serverNames
-	ov.CurrentServer = st.config.Name
 
+	for _, s := range globalConfig.Servers {
+		ov.AvailableServers = append(ov.AvailableServers, s.Name)
+	}
+	ov.CurrentServer = st.config.Name
 	return ov, nil
 }
 
@@ -604,7 +544,6 @@ func fetchBlocking(st *ServerState) ([]BlockingChain, error) {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var result []BlockingChain
 	for rows.Next() {
 		var b BlockingChain
@@ -622,87 +561,54 @@ func fetchBlocking(st *ServerState) ([]BlockingChain, error) {
 
 func buildRecommendations(waits []WaitStat, ov Overview) []Recommendation {
 	var recs []Recommendation
-
 	if ov.CPUPressure {
-		recs = append(recs, Recommendation{
-			Severity: "high",
-			Category: "CPU",
-			Message:  fmt.Sprintf("Signal wait %% is %.1f%% (>25%%) — significant CPU pressure detected. Check for runaway queries, high MAXDOP, or insufficient CPU.", ov.SignalWaitPct),
-		})
+		recs = append(recs, Recommendation{Severity: "high", Category: "CPU",
+			Message: fmt.Sprintf("Signal wait %% is %.1f%% (>25%%) — significant CPU pressure. Check for runaway queries, high MAXDOP, or insufficient CPU.", ov.SignalWaitPct)})
 	}
-
+	seen := map[string]bool{}
 	for _, w := range waits {
 		if w.DeltaWaitTimeMs == 0 {
 			continue
 		}
 		wt := strings.ToUpper(w.WaitType)
+		var rec *Recommendation
 		switch {
-		case wt == "SOS_SCHEDULER_YIELD":
-			recs = append(recs, Recommendation{
-				Severity: "high", Category: "CPU",
-				Message: "High SOS_SCHEDULER_YIELD — queries competing for CPU. Look for missing indexes, large scans, or parameter sniffing issues.",
-			})
-		case strings.HasPrefix(wt, "PAGEIOLATCH_"):
-			recs = append(recs, Recommendation{
-				Severity: "high", Category: "I/O",
-				Message: fmt.Sprintf("%s — storage read I/O bottleneck. Check disk latency, missing indexes, or insufficient buffer pool.", w.WaitType),
-			})
-		case wt == "WRITELOG":
-			recs = append(recs, Recommendation{
-				Severity: "high", Category: "I/O",
-				Message: "High WRITELOG — transaction log I/O bottleneck. Move log files to faster storage, reduce transaction frequency, check for implicit transactions.",
-			})
-		case wt == "RESOURCE_SEMAPHORE":
-			recs = append(recs, Recommendation{
-				Severity: "high", Category: "Memory",
-				Message: "RESOURCE_SEMAPHORE — queries waiting for memory grants. Check for large sorts/hashes, missing indexes causing spills, or low max server memory.",
-			})
-		case wt == "CXPACKET" || wt == "CXCONSUMER":
-			recs = append(recs, Recommendation{
-				Severity: "medium", Category: "Parallelism",
-				Message: fmt.Sprintf("%s — parallelism overhead. Review MAXDOP settings, Cost Threshold for Parallelism, and queries triggering parallel plans.", w.WaitType),
-			})
-		case strings.HasPrefix(wt, "LCK_M_"):
-			recs = append(recs, Recommendation{
-				Severity: "high", Category: "Locking",
-				Message: fmt.Sprintf("%s — lock contention detected. Review transaction isolation levels, long-running transactions, and missing indexes on frequently locked tables.", w.WaitType),
-			})
-		case wt == "ASYNC_NETWORK_IO":
-			recs = append(recs, Recommendation{
-				Severity: "medium", Category: "Network",
-				Message: "ASYNC_NETWORK_IO — clients are not consuming results fast enough. Check application-side result set processing, row buffering, and network throughput.",
-			})
-		case strings.HasPrefix(wt, "PAGELATCH_"):
-			recs = append(recs, Recommendation{
-				Severity: "medium", Category: "Latch",
-				Message: "PAGELATCH — in-memory page latch contention. Check tempdb contention (add files), or hot pages in user tables (use GUID PKs with care).",
-			})
-		case wt == "THREADPOOL":
-			recs = append(recs, Recommendation{
-				Severity: "high", Category: "CPU",
-				Message: "THREADPOOL — worker thread exhaustion. SQL Server cannot service requests. Reduce concurrent connections, check for blocking chains, or increase max worker threads carefully.",
-			})
+		case wt == "SOS_SCHEDULER_YIELD" && !seen["cpu"]:
+			seen["cpu"] = true
+			rec = &Recommendation{Severity: "high", Category: "CPU", Message: "High SOS_SCHEDULER_YIELD — queries competing for CPU. Check missing indexes, large scans, parameter sniffing."}
+		case strings.HasPrefix(wt, "PAGEIOLATCH_") && !seen["io"]:
+			seen["io"] = true
+			rec = &Recommendation{Severity: "high", Category: "I/O", Message: fmt.Sprintf("%s — storage read I/O bottleneck. Check disk latency, missing indexes, insufficient buffer pool.", w.WaitType)}
+		case wt == "WRITELOG" && !seen["wlog"]:
+			seen["wlog"] = true
+			rec = &Recommendation{Severity: "high", Category: "I/O", Message: "High WRITELOG — transaction log I/O bottleneck. Move log to faster storage, reduce transaction frequency."}
+		case wt == "RESOURCE_SEMAPHORE" && !seen["mem"]:
+			seen["mem"] = true
+			rec = &Recommendation{Severity: "high", Category: "Memory", Message: "RESOURCE_SEMAPHORE — queries waiting for memory grants. Check for large sorts/hashes, missing indexes causing spills."}
+		case (wt == "CXPACKET" || wt == "CXCONSUMER") && !seen["par"]:
+			seen["par"] = true
+			rec = &Recommendation{Severity: "medium", Category: "Parallelism", Message: fmt.Sprintf("%s — parallelism overhead. Review MAXDOP and Cost Threshold for Parallelism.", w.WaitType)}
+		case strings.HasPrefix(wt, "LCK_M_") && !seen["lck"]:
+			seen["lck"] = true
+			rec = &Recommendation{Severity: "high", Category: "Locking", Message: fmt.Sprintf("%s — lock contention. Review isolation levels and long-running transactions.", w.WaitType)}
+		case wt == "ASYNC_NETWORK_IO" && !seen["net"]:
+			seen["net"] = true
+			rec = &Recommendation{Severity: "medium", Category: "Network", Message: "ASYNC_NETWORK_IO — clients not consuming results fast enough. Check application-side result processing."}
+		case strings.HasPrefix(wt, "PAGELATCH_") && !seen["latch"]:
+			seen["latch"] = true
+			rec = &Recommendation{Severity: "medium", Category: "Latch", Message: "PAGELATCH — in-memory page latch contention. Check tempdb file count or hot page contention."}
+		case wt == "THREADPOOL" && !seen["tp"]:
+			seen["tp"] = true
+			rec = &Recommendation{Severity: "high", Category: "CPU", Message: "THREADPOOL — worker thread exhaustion. Reduce concurrent connections or check for blocking chains."}
+		}
+		if rec != nil {
+			recs = append(recs, *rec)
 		}
 	}
-
 	if len(recs) == 0 {
-		recs = append(recs, Recommendation{
-			Severity: "info", Category: "General",
-			Message: "No significant wait pressure detected in this interval. Instance appears healthy.",
-		})
+		recs = append(recs, Recommendation{Severity: "info", Category: "General", Message: "No significant wait pressure detected. Instance appears healthy."})
 	}
-
-	// Deduplicate by category+severity
-	seen := map[string]bool{}
-	var deduped []Recommendation
-	for _, r := range recs {
-		key := r.Category + r.Severity
-		if !seen[key] {
-			seen[key] = true
-			deduped = append(deduped, r)
-		}
-	}
-	return deduped
+	return recs
 }
 
 func fetchDeadlocks(st *ServerState) []Deadlock {
@@ -711,7 +617,6 @@ func fetchDeadlocks(st *ServerState) []Deadlock {
 		return nil
 	}
 	defer rows.Close()
-
 	var result []Deadlock
 	for rows.Next() {
 		var d Deadlock
@@ -744,14 +649,102 @@ func errResponse(w http.ResponseWriter, code int, msg string) {
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
+func handleAddServer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		errResponse(w, 405, "method not allowed")
+		return
+	}
+	var sc ServerConfig
+	if err := json.NewDecoder(r.Body).Decode(&sc); err != nil {
+		errResponse(w, 400, "invalid JSON: "+err.Error())
+		return
+	}
+	if sc.Name == "" {
+		sc.Name = sc.Host
+	}
+	if sc.Port == 0 {
+		sc.Port = 1433
+	}
+
+	// Test connection
+	connStr := buildConnString(sc)
+	db, err := sql.Open("sqlserver", connStr)
+	if err != nil {
+		errResponse(w, 500, "driver error: "+err.Error())
+		return
+	}
+	db.SetConnMaxLifetime(10 * time.Second)
+	if err := db.Ping(); err != nil {
+		db.Close()
+		errResponse(w, 500, "connection failed: "+err.Error())
+		return
+	}
+	db.Close()
+
+	// Save
+	found := false
+	for i, s := range globalConfig.Servers {
+		if s.Name == sc.Name {
+			globalConfig.Servers[i] = sc
+			found = true
+			break
+		}
+	}
+	if !found {
+		globalConfig.Servers = append(globalConfig.Servers, sc)
+	}
+
+	stateMu.Lock()
+	if st, ok := serverStates[sc.Name]; ok {
+		st.db.Close()
+		delete(serverStates, sc.Name)
+	}
+	activeServer = sc.Name
+	stateMu.Unlock()
+
+	saveConfig()
+	jsonResponse(w, map[string]string{"status": "ok", "server": sc.Name})
+}
+
+func handleRemoveServer(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		errResponse(w, 400, "missing name")
+		return
+	}
+	var newList []ServerConfig
+	for _, s := range globalConfig.Servers {
+		if s.Name != name {
+			newList = append(newList, s)
+		}
+	}
+	globalConfig.Servers = newList
+
+	stateMu.Lock()
+	if st, ok := serverStates[name]; ok {
+		st.db.Close()
+		delete(serverStates, name)
+	}
+	if activeServer == name {
+		if len(globalConfig.Servers) > 0 {
+			activeServer = globalConfig.Servers[0].Name
+		} else {
+			activeServer = ""
+		}
+	}
+	stateMu.Unlock()
+
+	saveConfig()
+	jsonResponse(w, map[string]string{"status": "ok"})
+}
+
 func handleSwitchServer(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 	if name == "" {
-		errResponse(w, 400, "missing name param")
+		errResponse(w, 400, "missing name")
 		return
 	}
-	_, err := getOrCreateState(name)
-	if err != nil {
+	if _, err := getOrCreateState(name); err != nil {
 		errResponse(w, 500, err.Error())
 		return
 	}
@@ -761,93 +754,21 @@ func handleSwitchServer(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, map[string]string{"status": "ok", "server": name})
 }
 
-func handleWaits(w http.ResponseWriter, r *http.Request) {
-	st, err := currentState()
-	if err != nil {
-		errResponse(w, 500, err.Error())
-		return
-	}
-	waits, err := fetchWaits(st)
-	if err != nil {
-		errResponse(w, 500, err.Error())
-		return
-	}
-	jsonResponse(w, waits)
-}
-
-func handleActive(w http.ResponseWriter, r *http.Request) {
-	st, err := currentState()
-	if err != nil {
-		errResponse(w, 500, err.Error())
-		return
-	}
-	active, err := fetchActive(st)
-	if err != nil {
-		errResponse(w, 500, err.Error())
-		return
-	}
-	jsonResponse(w, active)
-}
-
-func handleBlocking(w http.ResponseWriter, r *http.Request) {
-	st, err := currentState()
-	if err != nil {
-		errResponse(w, 500, err.Error())
-		return
-	}
-	blocking, err := fetchBlocking(st)
-	if err != nil {
-		errResponse(w, 500, err.Error())
-		return
-	}
-	jsonResponse(w, blocking)
-}
-
-func handleOverview(w http.ResponseWriter, r *http.Request) {
-	st, err := currentState()
-	if err != nil {
-		errResponse(w, 500, err.Error())
-		return
-	}
-	waits, _ := fetchWaits(st)
-	active, _ := fetchActive(st)
-	ov, err := fetchOverview(st, waits, active)
-	if err != nil {
-		errResponse(w, 500, err.Error())
-		return
-	}
-	jsonResponse(w, ov)
-}
-
-func handleRecommendations(w http.ResponseWriter, r *http.Request) {
-	st, err := currentState()
-	if err != nil {
-		errResponse(w, 500, err.Error())
-		return
-	}
-	waits, _ := fetchWaits(st)
-	active, _ := fetchActive(st)
-	ov, _ := fetchOverview(st, waits, active)
-	recs := buildRecommendations(waits, ov)
-	jsonResponse(w, recs)
-}
-
-func handleDeadlocks(w http.ResponseWriter, r *http.Request) {
-	st, err := currentState()
-	if err != nil {
-		errResponse(w, 500, err.Error())
-		return
-	}
-	dl := fetchDeadlocks(st)
-	jsonResponse(w, dl)
-}
-
 func handleAllData(w http.ResponseWriter, r *http.Request) {
 	st, err := currentState()
 	if err != nil {
+		if err.Error() == "no_servers" {
+			jsonResponse(w, map[string]interface{}{
+				"no_servers":       true,
+				"available_servers": []string{},
+				"current_server":   "",
+			})
+			return
+		}
 		errResponse(w, 500, err.Error())
 		return
 	}
+
 	waits, _ := fetchWaits(st)
 	active, _ := fetchActive(st)
 	blocking, _ := fetchBlocking(st)
@@ -863,6 +784,27 @@ func handleAllData(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func handleDeadlocks(w http.ResponseWriter, r *http.Request) {
+	st, err := currentState()
+	if err != nil {
+		jsonResponse(w, []Deadlock{})
+		return
+	}
+	jsonResponse(w, fetchDeadlocks(st))
+}
+
+func handleConfig(w http.ResponseWriter, r *http.Request) {
+	var serverNames []string
+	for _, s := range globalConfig.Servers {
+		serverNames = append(serverNames, s.Name)
+	}
+	jsonResponse(w, map[string]interface{}{
+		"refresh_seconds":   globalConfig.RefreshSeconds,
+		"available_servers": serverNames,
+		"current_server":    activeServer,
+	})
+}
+
 // ─────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────
@@ -870,7 +812,6 @@ func handleAllData(w http.ResponseWriter, r *http.Request) {
 func main() {
 	loadConfig()
 
-	// Default active server
 	if len(globalConfig.Servers) > 0 {
 		name := globalConfig.DefaultServer
 		if name == "" {
@@ -880,23 +821,13 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-
-	// API routes
 	mux.HandleFunc("/api/all", handleAllData)
-	mux.HandleFunc("/api/overview", handleOverview)
-	mux.HandleFunc("/api/waits", handleWaits)
-	mux.HandleFunc("/api/active", handleActive)
-	mux.HandleFunc("/api/blocking", handleBlocking)
-	mux.HandleFunc("/api/recommendations", handleRecommendations)
 	mux.HandleFunc("/api/deadlocks", handleDeadlocks)
 	mux.HandleFunc("/api/switch", handleSwitchServer)
-	mux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
-		jsonResponse(w, map[string]interface{}{
-			"refresh_seconds": globalConfig.RefreshSeconds,
-		})
-	})
+	mux.HandleFunc("/api/server/add", handleAddServer)
+	mux.HandleFunc("/api/server/remove", handleRemoveServer)
+	mux.HandleFunc("/api/config", handleConfig)
 
-	// Static files
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err != nil {
 		log.Fatal(err)
@@ -904,9 +835,7 @@ func main() {
 	mux.Handle("/", http.FileServer(http.FS(staticFS)))
 
 	addr := fmt.Sprintf(":%d", globalConfig.ListenPort)
-	log.Printf("WaitDash starting on http://localhost%s", addr)
-	log.Printf("Active server: %s", activeServer)
-
+	log.Printf("WaitDash → http://localhost%s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
 	}
