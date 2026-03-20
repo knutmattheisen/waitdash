@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -13,7 +13,7 @@
   <div class="modal">
     <div class="modal-header">
       <span class="modal-title">⚡ Connect to SQL Server</span>
-      <button class="modal-close" id="modal-close-btn" title="Close">✕</button>
+      <button class="modal-close" id="modal-close-btn">✕</button>
     </div>
     <div class="modal-body">
       <div class="form-row">
@@ -37,8 +37,8 @@
       <div class="form-row">
         <label>Authentication</label>
         <div class="auth-toggle">
-          <button class="auth-btn active" data-auth="windows" id="auth-windows">Windows Auth</button>
-          <button class="auth-btn" data-auth="sql" id="auth-sql">SQL Server Auth</button>
+          <button class="auth-btn active" data-auth="windows">Windows Auth</button>
+          <button class="auth-btn" data-auth="sql">SQL Server Auth</button>
         </div>
       </div>
       <div id="sql-auth-fields" class="hidden">
@@ -60,6 +60,33 @@
   </div>
 </div>
 
+<!-- ─── WAIT DETAIL PANEL ─────────────────────── -->
+<div id="wait-panel" class="wait-panel hidden">
+  <div class="wait-panel-header">
+    <div>
+      <div class="wait-panel-type" id="wp-type">—</div>
+      <div class="wait-panel-cat" id="wp-cat">—</div>
+    </div>
+    <button class="wait-panel-close" id="wp-close">✕</button>
+  </div>
+  <div class="wait-panel-body">
+    <div class="wp-severity" id="wp-severity"></div>
+    <div class="wp-section">
+      <div class="wp-section-title">What it means</div>
+      <div class="wp-text" id="wp-description"></div>
+    </div>
+    <div class="wp-section">
+      <div class="wp-section-title">Common causes</div>
+      <div class="wp-text" id="wp-causes"></div>
+    </div>
+    <div class="wp-section">
+      <div class="wp-section-title">What to do</div>
+      <div class="wp-text" id="wp-actions"></div>
+    </div>
+    <a class="wp-link" id="wp-link" href="#" target="_blank">📖 SQLskills Wait Library →</a>
+  </div>
+</div>
+
 <!-- ─── HEADER ────────────────────────────────── -->
 <header id="header">
   <div class="header-left">
@@ -71,7 +98,6 @@
   </div>
 
   <div class="header-center">
-    <!-- Active server info panel -->
     <div id="server-info-panel" class="server-info-panel hidden">
       <div class="sip-name" id="sip-name">—</div>
       <div class="sip-meta">
@@ -90,14 +116,12 @@
   </div>
 
   <div class="header-right">
-    <!-- Health Ampel -->
     <div id="health-ampel" class="health-ampel" title="Instance Health">
       <div class="ampel-light" id="amp-red"></div>
       <div class="ampel-light" id="amp-yellow"></div>
       <div class="ampel-light" id="amp-green"></div>
     </div>
 
-    <!-- Server switcher -->
     <div class="server-switcher" id="server-switcher-wrap">
       <select id="server-select" title="Switch target server"></select>
       <button class="btn-icon" id="remove-server-btn" title="Remove selected server">✕</button>
@@ -105,7 +129,8 @@
 
     <button class="btn-add-server" id="add-server-btn">+ Add Server</button>
 
-    <!-- Refresh control -->
+    <button class="btn-theme" id="theme-toggle" title="Toggle Light/Dark">🌙</button>
+
     <div class="refresh-control">
       <label class="label">Refresh</label>
       <select id="refresh-select">
@@ -172,7 +197,7 @@
   </div>
 
   <div class="tab-content active" id="tab-delta-waits">
-    <div class="table-note">Instance-level waits (sys.dm_os_wait_stats) — not per-database. Sorted by delta in this refresh interval.</div>
+    <div class="table-note">Instance-level waits (sys.dm_os_wait_stats) — not per-database. Sorted by delta in this refresh interval. <strong>Click any wait type for details.</strong></div>
     <div class="table-wrapper">
       <table id="tbl-delta-waits">
         <thead><tr>
@@ -185,7 +210,7 @@
   </div>
 
   <div class="tab-content" id="tab-cumulative-waits">
-    <div class="table-note">Cumulative since last SQL Server restart or manual reset. Instance-level only.</div>
+    <div class="table-note">Cumulative since last SQL Server restart or manual reset. <strong>Click any wait type for details.</strong></div>
     <div class="table-wrapper">
       <table id="tbl-cumulative-waits">
         <thead><tr>
