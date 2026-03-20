@@ -1,0 +1,37 @@
+{
+  "listen_port": 9090,
+  "refresh_seconds": 5,
+  "default_server": "PROD-SQL01",
+  "servers": [
+    {
+      "name": "PROD-SQL01",
+      "host": "PROD-SQL01",
+      "port": 1433,
+      "instance": "",
+      "auth_mode": "windows"
+    },
+    {
+      "name": "PROD-SQL01\\INST2",
+      "host": "PROD-SQL01",
+      "port": 1434,
+      "instance": "INST2",
+      "auth_mode": "windows"
+    },
+    {
+      "name": "DEV-SQL (SQL Auth)",
+      "host": "192.168.1.50",
+      "port": 1433,
+      "instance": "",
+      "auth_mode": "sql",
+      "user": "sa",
+      "password": "YourPasswordHere"
+    },
+    {
+      "name": "Local Default",
+      "host": "localhost",
+      "port": 1433,
+      "instance": "",
+      "auth_mode": "windows"
+    }
+  ]
+}

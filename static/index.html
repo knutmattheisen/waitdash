@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WaitDash — SQL Server Wait Statistics</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- HEADER -->
+<header id="header">
+  <div class="header-left">
+    <div class="logo">⚡ WaitDash</div>
+    <div class="header-meta">
+      <span id="hdr-server" class="badge badge-blue">—</span>
+      <span id="hdr-version" class="badge badge-gray" title="SQL Version">—</span>
+    </div>
+  </div>
+  <div class="header-center">
+    <div class="header-time">
+      <div><span class="label">Started</span> <span id="hdr-starttime">—</span></div>
+      <div><span class="label">Uptime</span> <span id="hdr-uptime">—</span></div>
+      <div><span class="label">Now</span> <span id="hdr-now">—</span></div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="server-switcher">
+      <label class="label">Target</label>
+      <select id="server-select"></select>
+    </div>
+    <div class="refresh-control">
+      <label class="label">Refresh</label>
+      <select id="refresh-select">
+        <option value="5000" selected>5s</option>
+        <option value="10000">10s</option>
+        <option value="30000">30s</option>
+        <option value="60000">60s</option>
+      </select>
+    </div>
+    <div id="status-dot" class="status-dot" title="Connection status"></div>
+  </div>
+</header>
+
+<!-- KPI CARDS -->
+<section class="kpi-row">
+  <div class="kpi-card" id="kpi-signal">
+    <div class="kpi-label">Signal Wait %</div>
+    <div class="kpi-value" id="kpi-signal-val">—</div>
+    <div class="kpi-sub" id="kpi-signal-sub">CPU Pressure Indicator</div>
+  </div>
+  <div class="kpi-card" id="kpi-topcat">
+    <div class="kpi-label">Top Wait Category</div>
+    <div class="kpi-value" id="kpi-topcat-val">—</div>
+    <div class="kpi-sub">By delta in this interval</div>
+  </div>
+  <div class="kpi-card" id="kpi-blocked">
+    <div class="kpi-label">Blocked Sessions</div>
+    <div class="kpi-value" id="kpi-blocked-val">—</div>
+    <div class="kpi-sub">Active blocking chains</div>
+  </div>
+  <div class="kpi-card" id="kpi-active">
+    <div class="kpi-label">Active Requests</div>
+    <div class="kpi-value" id="kpi-active-val">—</div>
+    <div class="kpi-sub">User processes running</div>
+  </div>
+</section>
+
+<!-- CHARTS ROW -->
+<section class="charts-row">
+  <div class="chart-card">
+    <div class="chart-title">Wait Category Distribution (Delta)</div>
+    <canvas id="chart-category" height="180"></canvas>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">Top 10 Delta Waits (ms)</div>
+    <canvas id="chart-topwaits" height="180"></canvas>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">Signal vs Resource Waits</div>
+    <canvas id="chart-signal" height="180"></canvas>
+  </div>
+</section>
+
+<!-- TABS -->
+<section class="tabs-section">
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="delta-waits">Delta Waits</button>
+    <button class="tab-btn" data-tab="cumulative-waits">Cumulative Waits</button>
+    <button class="tab-btn" data-tab="active-requests">Active Requests</button>
+    <button class="tab-btn" data-tab="blocking">Blocking</button>
+    <button class="tab-btn" data-tab="recommendations">Recommendations</button>
+    <button class="tab-btn" data-tab="deadlocks">Deadlocks</button>
+  </div>
+
+  <!-- Delta Waits -->
+  <div class="tab-content active" id="tab-delta-waits">
+    <div class="table-note">Instance-level waits (sys.dm_os_wait_stats) — not per-database. Sorted by delta in this refresh interval.</div>
+    <div class="table-wrapper">
+      <table id="tbl-delta-waits">
+        <thead>
+          <tr>
+            <th>Wait Type</th>
+            <th>Category</th>
+            <th>Delta Wait (ms)</th>
+            <th>Delta Tasks</th>
+            <th>Avg Wait (ms)</th>
+            <th>Max Wait (ms)</th>
+            <th>% of Total</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Cumulative Waits -->
+  <div class="tab-content" id="tab-cumulative-waits">
+    <div class="table-note">Cumulative since last SQL Server restart or manual reset. Instance-level only.</div>
+    <div class="table-wrapper">
+      <table id="tbl-cumulative-waits">
+        <thead>
+          <tr>
+            <th>Wait Type</th>
+            <th>Category</th>
+            <th>Total Wait (ms)</th>
+            <th>Tasks Count</th>
+            <th>Signal Wait (ms)</th>
+            <th>Resource Wait (ms)</th>
+            <th>Avg Wait (ms)</th>
+            <th>Max Wait (ms)</th>
+            <th>% of Total</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Active Requests -->
+  <div class="tab-content" id="tab-active-requests">
+    <div class="table-note">Active user requests currently executing (excluding sleeping sessions and WaitDash itself).</div>
+    <div class="table-wrapper">
+      <table id="tbl-active">
+        <thead>
+          <tr>
+            <th>SPID</th>
+            <th>Status</th>
+            <th>Wait Type</th>
+            <th>Wait (ms)</th>
+            <th>Blocking</th>
+            <th>Elapsed (ms)</th>
+            <th>CPU (ms)</th>
+            <th>Logical Reads</th>
+            <th>Database</th>
+            <th>Login</th>
+            <th>Host</th>
+            <th>SQL (preview)</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Blocking -->
+  <div class="tab-content" id="tab-blocking">
+    <div class="table-note">Sessions actively blocked by another session. Shows blocking chain relationships.</div>
+    <div class="table-wrapper">
+      <table id="tbl-blocking">
+        <thead>
+          <tr>
+            <th>Blocked SPID</th>
+            <th>Blocking SPID</th>
+            <th>Wait Type</th>
+            <th>Wait Resource</th>
+            <th>Wait (ms)</th>
+            <th>Blocked SQL</th>
+            <th>Blocking SQL</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Recommendations -->
+  <div class="tab-content" id="tab-recommendations">
+    <div id="recs-container"></div>
+  </div>
+
+  <!-- Deadlocks -->
+  <div class="tab-content" id="tab-deadlocks">
+    <div class="table-note">Deadlock events from system_health extended event session (last 20). Must have system_health running (default on SQL 2012+).</div>
+    <div id="deadlocks-container"></div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <span>WaitDash — Portable SQL Server DBA Tool</span>
+  <span id="last-refresh">Never refreshed</span>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
