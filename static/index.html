@@ -8,27 +8,104 @@
 </head>
 <body>
 
-<!-- HEADER -->
+<!-- ─── CONNECT MODAL ─────────────────────────── -->
+<div id="modal-overlay" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">⚡ Connect to SQL Server</span>
+      <button class="modal-close" id="modal-close-btn" title="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <label>Display Name</label>
+        <input id="f-name" type="text" placeholder="e.g. PROD-SQL01" autocomplete="off">
+      </div>
+      <div class="form-row">
+        <label>Host / IP</label>
+        <input id="f-host" type="text" placeholder="e.g. sql01.domain.local or 192.168.1.10" autocomplete="off">
+      </div>
+      <div class="form-row two-col">
+        <div>
+          <label>Port</label>
+          <input id="f-port" type="number" value="1433" min="1" max="65535">
+        </div>
+        <div>
+          <label>Instance (optional)</label>
+          <input id="f-instance" type="text" placeholder="e.g. MSSQLSERVER">
+        </div>
+      </div>
+      <div class="form-row">
+        <label>Authentication</label>
+        <div class="auth-toggle">
+          <button class="auth-btn active" data-auth="windows" id="auth-windows">Windows Auth</button>
+          <button class="auth-btn" data-auth="sql" id="auth-sql">SQL Server Auth</button>
+        </div>
+      </div>
+      <div id="sql-auth-fields" class="hidden">
+        <div class="form-row">
+          <label>Username</label>
+          <input id="f-user" type="text" placeholder="sa" autocomplete="off">
+        </div>
+        <div class="form-row">
+          <label>Password</label>
+          <input id="f-password" type="password" autocomplete="new-password">
+        </div>
+      </div>
+      <div id="connect-error" class="connect-error hidden"></div>
+      <button id="connect-btn" class="btn-connect">
+        <span id="connect-btn-text">Connect</span>
+        <span id="connect-spinner" class="spinner hidden"></span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── HEADER ────────────────────────────────── -->
 <header id="header">
   <div class="header-left">
-    <div class="logo">⚡ WaitDash</div>
-    <div class="header-meta">
-      <span id="hdr-server" class="badge badge-blue">—</span>
-      <span id="hdr-version" class="badge badge-gray" title="SQL Version">—</span>
+    <div class="logo">
+      <span class="logo-icon">⚡</span>
+      <span class="logo-text">WaitDash</span>
+      <span class="logo-by">by DBO Dominik Böttger · powered by Claude.AI</span>
     </div>
   </div>
+
   <div class="header-center">
-    <div class="header-time">
-      <div><span class="label">Started</span> <span id="hdr-starttime">—</span></div>
-      <div><span class="label">Uptime</span> <span id="hdr-uptime">—</span></div>
-      <div><span class="label">Now</span> <span id="hdr-now">—</span></div>
+    <!-- Active server info panel -->
+    <div id="server-info-panel" class="server-info-panel hidden">
+      <div class="sip-name" id="sip-name">—</div>
+      <div class="sip-meta">
+        <span id="sip-edition">—</span>
+        <span class="sip-sep">·</span>
+        <span id="sip-level">—</span>
+        <span class="sip-sep">·</span>
+        <span id="sip-cpu">—</span>
+        <span class="sip-sep">·</span>
+        <span id="sip-ram">—</span>
+        <span class="sip-sep">·</span>
+        <span id="sip-uptime">—</span>
+      </div>
     </div>
+    <div id="no-server-hint" class="no-server-hint">No server connected — click <strong>+ Add Server</strong> to get started</div>
   </div>
+
   <div class="header-right">
-    <div class="server-switcher">
-      <label class="label">Target</label>
-      <select id="server-select"></select>
+    <!-- Health Ampel -->
+    <div id="health-ampel" class="health-ampel" title="Instance Health">
+      <div class="ampel-light" id="amp-red"></div>
+      <div class="ampel-light" id="amp-yellow"></div>
+      <div class="ampel-light" id="amp-green"></div>
     </div>
+
+    <!-- Server switcher -->
+    <div class="server-switcher" id="server-switcher-wrap">
+      <select id="server-select" title="Switch target server"></select>
+      <button class="btn-icon" id="remove-server-btn" title="Remove selected server">✕</button>
+    </div>
+
+    <button class="btn-add-server" id="add-server-btn">+ Add Server</button>
+
+    <!-- Refresh control -->
     <div class="refresh-control">
       <label class="label">Refresh</label>
       <select id="refresh-select">
@@ -38,16 +115,17 @@
         <option value="60000">60s</option>
       </select>
     </div>
+
     <div id="status-dot" class="status-dot" title="Connection status"></div>
   </div>
 </header>
 
-<!-- KPI CARDS -->
+<!-- ─── KPI CARDS ─────────────────────────────── -->
 <section class="kpi-row">
   <div class="kpi-card" id="kpi-signal">
     <div class="kpi-label">Signal Wait %</div>
     <div class="kpi-value" id="kpi-signal-val">—</div>
-    <div class="kpi-sub" id="kpi-signal-sub">CPU Pressure Indicator</div>
+    <div class="kpi-sub">CPU Pressure Indicator</div>
   </div>
   <div class="kpi-card" id="kpi-topcat">
     <div class="kpi-label">Top Wait Category</div>
@@ -66,7 +144,7 @@
   </div>
 </section>
 
-<!-- CHARTS ROW -->
+<!-- ─── CHARTS ────────────────────────────────── -->
 <section class="charts-row">
   <div class="chart-card">
     <div class="chart-title">Wait Category Distribution (Delta)</div>
@@ -82,7 +160,7 @@
   </div>
 </section>
 
-<!-- TABS -->
+<!-- ─── TABS ──────────────────────────────────── -->
 <section class="tabs-section">
   <div class="tab-bar">
     <button class="tab-btn active" data-tab="delta-waits">Delta Waits</button>
@@ -93,112 +171,73 @@
     <button class="tab-btn" data-tab="deadlocks">Deadlocks</button>
   </div>
 
-  <!-- Delta Waits -->
   <div class="tab-content active" id="tab-delta-waits">
     <div class="table-note">Instance-level waits (sys.dm_os_wait_stats) — not per-database. Sorted by delta in this refresh interval.</div>
     <div class="table-wrapper">
       <table id="tbl-delta-waits">
-        <thead>
-          <tr>
-            <th>Wait Type</th>
-            <th>Category</th>
-            <th>Delta Wait (ms)</th>
-            <th>Delta Tasks</th>
-            <th>Avg Wait (ms)</th>
-            <th>Max Wait (ms)</th>
-            <th>% of Total</th>
-          </tr>
-        </thead>
+        <thead><tr>
+          <th>Wait Type</th><th>Category</th><th>Delta Wait (ms)</th>
+          <th>Delta Tasks</th><th>Avg Wait (ms)</th><th>Max Wait (ms)</th><th>% of Total</th>
+        </tr></thead>
         <tbody></tbody>
       </table>
     </div>
   </div>
 
-  <!-- Cumulative Waits -->
   <div class="tab-content" id="tab-cumulative-waits">
     <div class="table-note">Cumulative since last SQL Server restart or manual reset. Instance-level only.</div>
     <div class="table-wrapper">
       <table id="tbl-cumulative-waits">
-        <thead>
-          <tr>
-            <th>Wait Type</th>
-            <th>Category</th>
-            <th>Total Wait (ms)</th>
-            <th>Tasks Count</th>
-            <th>Signal Wait (ms)</th>
-            <th>Resource Wait (ms)</th>
-            <th>Avg Wait (ms)</th>
-            <th>Max Wait (ms)</th>
-            <th>% of Total</th>
-          </tr>
-        </thead>
+        <thead><tr>
+          <th>Wait Type</th><th>Category</th><th>Total Wait (ms)</th><th>Tasks Count</th>
+          <th>Signal Wait (ms)</th><th>Resource Wait (ms)</th><th>Avg Wait (ms)</th>
+          <th>Max Wait (ms)</th><th>% of Total</th>
+        </tr></thead>
         <tbody></tbody>
       </table>
     </div>
   </div>
 
-  <!-- Active Requests -->
   <div class="tab-content" id="tab-active-requests">
     <div class="table-note">Active user requests currently executing (excluding sleeping sessions and WaitDash itself).</div>
     <div class="table-wrapper">
       <table id="tbl-active">
-        <thead>
-          <tr>
-            <th>SPID</th>
-            <th>Status</th>
-            <th>Wait Type</th>
-            <th>Wait (ms)</th>
-            <th>Blocking</th>
-            <th>Elapsed (ms)</th>
-            <th>CPU (ms)</th>
-            <th>Logical Reads</th>
-            <th>Database</th>
-            <th>Login</th>
-            <th>Host</th>
-            <th>SQL (preview)</th>
-          </tr>
-        </thead>
+        <thead><tr>
+          <th>SPID</th><th>Status</th><th>Wait Type</th><th>Wait (ms)</th>
+          <th>Blocking</th><th>Elapsed (ms)</th><th>CPU (ms)</th><th>Logical Reads</th>
+          <th>Database</th><th>Login</th><th>Host</th><th>SQL Preview</th>
+        </tr></thead>
         <tbody></tbody>
       </table>
     </div>
   </div>
 
-  <!-- Blocking -->
   <div class="tab-content" id="tab-blocking">
-    <div class="table-note">Sessions actively blocked by another session. Shows blocking chain relationships.</div>
+    <div class="table-note">Sessions actively blocked by another session.</div>
     <div class="table-wrapper">
       <table id="tbl-blocking">
-        <thead>
-          <tr>
-            <th>Blocked SPID</th>
-            <th>Blocking SPID</th>
-            <th>Wait Type</th>
-            <th>Wait Resource</th>
-            <th>Wait (ms)</th>
-            <th>Blocked SQL</th>
-            <th>Blocking SQL</th>
-          </tr>
-        </thead>
+        <thead><tr>
+          <th>Blocked SPID</th><th>Blocking SPID</th><th>Wait Type</th>
+          <th>Wait Resource</th><th>Wait (ms)</th><th>Blocked SQL</th><th>Blocking SQL</th>
+        </tr></thead>
         <tbody></tbody>
       </table>
     </div>
   </div>
 
-  <!-- Recommendations -->
   <div class="tab-content" id="tab-recommendations">
     <div id="recs-container"></div>
   </div>
 
-  <!-- Deadlocks -->
   <div class="tab-content" id="tab-deadlocks">
-    <div class="table-note">Deadlock events from system_health extended event session (last 20). Must have system_health running (default on SQL 2012+).</div>
+    <div class="table-note">Deadlock events from system_health extended event session (last 20).</div>
     <div id="deadlocks-container"></div>
   </div>
 </section>
 
-<!-- FOOTER -->
+<!-- ─── FOOTER ────────────────────────────────── -->
 <footer class="footer">
-  <span>WaitDash — Portable SQL Server DBA Tool</span>
+  <span>WaitDash · DBO Dominik Böttger · powered by Claude.AI</span>
   <span id="last-refresh">Never refreshed</span>
 </footer>
 
