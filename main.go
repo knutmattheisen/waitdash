@@ -76,7 +76,7 @@ func saveConfig() error {
 }
 
 // ─────────────────────────────────────────────
-// Wait category
+// Wait categories
 // ─────────────────────────────────────────────
 
 func categorizeWait(waitType string) string {
@@ -154,29 +154,29 @@ type BlockingChain struct {
 }
 
 type Overview struct {
-	ServerName        string    `json:"server_name"`
-	SQLVersion        string    `json:"sql_version"`
-	Edition           string    `json:"edition"`
-	ProductLevel      string    `json:"product_level"`
-	ProductUpdate     string    `json:"product_update"`
-	LicenseType       string    `json:"license_type"`
-	PhysicalMemGB     int       `json:"physical_mem_gb"`
-	LogicalCPUs       int       `json:"logical_cpus"`
-	MaxServerMemMB    int64     `json:"max_server_mem_mb"`
-	StartTime         time.Time `json:"start_time"`
-	CurrentTime       time.Time `json:"current_time"`
-	UptimeHours       float64   `json:"uptime_hours"`
-	SignalWaitPct     float64   `json:"signal_wait_pct"`
-	TotalWaitMs       int64     `json:"total_wait_ms"`
-	SignalWaitMs      int64     `json:"signal_wait_ms"`
-	ResourceWaitMs    int64     `json:"resource_wait_ms"`
-	BlockedCount      int       `json:"blocked_count"`
-	ActiveRequestCount int      `json:"active_request_count"`
-	TopWaitCategory   string    `json:"top_wait_category"`
-	CPUPressure       bool      `json:"cpu_pressure"`
-	HealthStatus      string    `json:"health_status"`
-	AvailableServers  []string  `json:"available_servers"`
-	CurrentServer     string    `json:"current_server"`
+	ServerName         string    `json:"server_name"`
+	SQLVersion         string    `json:"sql_version"`
+	Edition            string    `json:"edition"`
+	ProductLevel       string    `json:"product_level"`
+	ProductUpdate      string    `json:"product_update"`
+	LicenseType        string    `json:"license_type"`
+	PhysicalMemGB      int       `json:"physical_mem_gb"`
+	LogicalCPUs        int       `json:"logical_cpus"`
+	MaxServerMemMB     int64     `json:"max_server_mem_mb"`
+	StartTime          time.Time `json:"start_time"`
+	CurrentTime        time.Time `json:"current_time"`
+	UptimeHours        float64   `json:"uptime_hours"`
+	SignalWaitPct      float64   `json:"signal_wait_pct"`
+	TotalWaitMs        int64     `json:"total_wait_ms"`
+	SignalWaitMs       int64     `json:"signal_wait_ms"`
+	ResourceWaitMs     int64     `json:"resource_wait_ms"`
+	BlockedCount       int       `json:"blocked_count"`
+	ActiveRequestCount int       `json:"active_request_count"`
+	TopWaitCategory    string    `json:"top_wait_category"`
+	CPUPressure        bool      `json:"cpu_pressure"`
+	HealthStatus       string    `json:"health_status"`
+	AvailableServers   []string  `json:"available_servers"`
+	CurrentServer      string    `json:"current_server"`
 }
 
 type Recommendation struct {
@@ -288,54 +288,98 @@ func currentState() (*ServerState, error) {
 }
 
 // ─────────────────────────────────────────────
-// Queries
+// SQLskills Paul Randal Goldstandard Exclusion List
 // ─────────────────────────────────────────────
 
 const queryWaits = `
 SELECT wait_type, waiting_tasks_count, wait_time_ms, max_wait_time_ms, signal_wait_time_ms
 FROM sys.dm_os_wait_stats
 WHERE wait_type NOT IN (
-    'SLEEP_TASK','BROKER_TASK_STOP','BROKER_TO_FLUSH','SQLTRACE_BUFFER_FLUSH',
-    'CLR_AUTO_EVENT','CLR_MANUAL_EVENT','LAZYWRITER_SLEEP',
-    'REQUEST_FOR_DEADLOCK_SEARCH','XE_TIMER_EVENT','XE_DISPATCHER_WAIT',
-    'FT_IFTS_SCHEDULER_IDLE_WAIT','DIRTY_PAGE_POLL',
-    'HADR_FILESTREAM_IOMGR_IOCOMPLETION','SP_SERVER_DIAGNOSTICS_SLEEP',
-    'WAIT_XTP_OFFLINE_CKPT_NEW_LOG','DISPATCHER_QUEUE_SEMAPHORE',
-    'BROKER_EVENTHANDLER','CHECKPOINT_QUEUE','DBMIRROR_EVENTS_QUEUE',
-    'SQLTRACE_INCREMENTAL_FLUSH_SLEEP','ONDEMAND_TASK_MANAGER',
-    'SERVER_IDLE_CHECK','SLEEP_DBSTARTUP','SLEEP_DCOMSTARTUP',
-    'SLEEP_MASTERDBREADY','SLEEP_MASTERMDREADY','SLEEP_MASTERUPGRADED',
-    'SLEEP_MSDBSTARTUP','SLEEP_SYSTEMTASK','SLEEP_TEMPDBSTARTUP',
-    'SNI_HTTP_ACCEPT','WAITFOR','XE_DISPATCHER_JOIN'
+    N'BROKER_EVENTHANDLER', N'BROKER_RECEIVE_WAITFOR', N'BROKER_TASK_STOP',
+    N'BROKER_TO_FLUSH', N'BROKER_TRANSMITTER', N'CHECKPOINT_QUEUE', N'CHKPT',
+    N'CLR_AUTO_EVENT', N'CLR_MANUAL_EVENT', N'CLR_SEMAPHORE',
+    N'CXCONSUMER',
+    N'DBMIRROR_DBM_EVENT', N'DBMIRROR_EVENTS_QUEUE', N'DBMIRROR_WORKER_QUEUE',
+    N'DBMIRRORING_CMD', N'DIRTY_PAGE_POLL', N'DISPATCHER_QUEUE_SEMAPHORE',
+    N'EXECSYNC', N'FSAGENT', N'FT_IFTS_SCHEDULER_IDLE_WAIT', N'FT_IFTSHC_MUTEX',
+    N'HADR_CLUSAPI_CALL', N'HADR_FILESTREAM_IOMGR_IOCOMPLETION',
+    N'HADR_WORK_QUEUE', N'HADR_TRANSPORT_DBRLIST',
+    N'IMPPROV_IOWAIT', N'INTERNAL_TESTING',
+    N'IO_QUEUE_LIMIT', N'IO_RETRY',
+    N'LAZYWRITER_SLEEP', N'LOGMGR_QUEUE', N'LOGMGR_RESERVE_APPEND',
+    N'LOWFAIL_MEMMGR_QUEUE',
+    N'MEMORY_ALLOCATION_EXT',
+    N'MSQL_DQ', N'MSQL_XACT_MGR_MUTEX', N'MSQL_XACT_MUTEX',
+    N'MSQL_XP', N'MSSEARCH',
+    N'NET_WAITFOR_PACKET', N'NODE_CACHE_MUTEX',
+    N'ONDEMAND_TASK_MANAGER',
+    N'PARALLEL_REDO_DRAIN_WORKER', N'PARALLEL_REDO_LOG_CACHE',
+    N'PARALLEL_REDO_TRAN_LIST', N'PARALLEL_REDO_WORKER_SYNC',
+    N'PARALLEL_REDO_WORKER_WAIT_WORK',
+    N'PRINT_ROLLBACK_PROGRESS',
+    N'PWAIT_ALL_COMPONENTS_INITIALIZED', N'PWAIT_DIRECTLOGCONSUMER_GETNEXT',
+    N'QDS_ASYNC_QUEUE', N'QDS_CLEANUP_STALE_QUERIES_TASK_MAIN_LOOP_SLEEP',
+    N'QDS_PERSIST_TASK_MAIN_LOOP_SLEEP', N'QDS_SHUTDOWN_QUEUE',
+    N'REDO_THREAD_PENDING_WORK',
+    N'REQUEST_FOR_DEADLOCK_SEARCH',
+    N'RESOURCE_QUEUE',
+    N'SERVER_IDLE_CHECK',
+    N'SLEEP_DBSTARTUP', N'SLEEP_DCOMSTARTUP', N'SLEEP_MASTERDBREADY',
+    N'SLEEP_MASTERMDREADY', N'SLEEP_MASTERUPGRADED', N'SLEEP_MSDBSTARTUP',
+    N'SLEEP_SYSTEMTASK', N'SLEEP_TASK', N'SLEEP_TEMPDBSTARTUP',
+    N'SNI_HTTP_ACCEPT',
+    N'SOS_WORK_DISPATCHER',
+    N'SP_SERVER_DIAGNOSTICS_SLEEP',
+    N'SQLTRACE_BUFFER_FLUSH', N'SQLTRACE_INCREMENTAL_FLUSH_SLEEP',
+    N'SQLTRACE_WAIT_ENTRIES',
+    N'WAIT_XTP_OFFLINE_CKPT_NEW_LOG',
+    N'WAITFOR', N'WAITFOR_TASKSHUTDOWN',
+    N'WAIT_XTP_HOST_WAIT', N'WAIT_XTP_OFFLINE_CKPT_NEW_LOG',
+    N'XE_DISPATCHER_JOIN', N'XE_DISPATCHER_WAIT',
+    N'XE_TIMER_EVENT', N'XE_TIMER_MUTEX', N'XE_TIMER_TASK_DONE',
+    N'XIO_CREDENTIAL_MGR_WAITSFOR'
 )
 AND wait_time_ms > 0
 ORDER BY wait_time_ms DESC`
 
+// Fixed active requests query - catches all non-sleeping user requests
 const queryActive = `
 SELECT
-    r.session_id, r.status, r.command,
-    ISNULL(r.wait_type,'') AS wait_type,
+    r.session_id,
+    r.status,
+    r.command,
+    ISNULL(r.wait_type, '') AS wait_type,
     r.wait_time,
-    ISNULL(r.wait_resource,'') AS wait_resource,
-    ISNULL(r.blocking_session_id,0) AS blocking_session_id,
-    r.cpu_time, r.logical_reads, r.reads, r.writes, r.total_elapsed_time,
-    ISNULL(DB_NAME(r.database_id),'') AS database_name,
-    ISNULL(s.host_name,'') AS host_name,
-    ISNULL(s.login_name,'') AS login_name,
-    ISNULL(s.program_name,'') AS program_name,
-    ISNULL(SUBSTRING(ISNULL(st.text,''),
-        (r.statement_start_offset/2)+1,
-        CASE WHEN r.statement_end_offset=-1
-             THEN LEN(CONVERT(nvarchar(max),ISNULL(st.text,'')))*2
-             ELSE r.statement_end_offset
-        END - r.statement_start_offset)/2+1, 500),'') AS sql_text
+    ISNULL(r.wait_resource, '') AS wait_resource,
+    ISNULL(r.blocking_session_id, 0) AS blocking_session_id,
+    r.cpu_time,
+    r.logical_reads,
+    r.reads,
+    r.writes,
+    r.total_elapsed_time,
+    ISNULL(DB_NAME(r.database_id), '') AS database_name,
+    ISNULL(s.host_name, '') AS host_name,
+    ISNULL(s.login_name, '') AS login_name,
+    ISNULL(s.program_name, '') AS program_name,
+    ISNULL(
+        SUBSTRING(
+            ISNULL(st.text, ''),
+            (r.statement_start_offset / 2) + 1,
+            (
+                CASE r.statement_end_offset
+                    WHEN -1 THEN DATALENGTH(ISNULL(st.text, ''))
+                    ELSE r.statement_end_offset
+                END - r.statement_start_offset
+            ) / 2 + 1
+        ), ''
+    ) AS sql_text
 FROM sys.dm_exec_requests r
-JOIN sys.dm_exec_sessions s ON r.session_id = s.session_id
-OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) st
-WHERE r.session_id != @@SPID
+INNER JOIN sys.dm_exec_sessions s ON r.session_id = s.session_id
+OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) AS st
+WHERE r.session_id <> @@SPID
   AND s.is_user_process = 1
-  AND r.status NOT IN ('background','sleeping')
-  AND ISNULL(s.program_name,'') NOT LIKE '%WaitDash%'
+  AND s.status <> 'sleeping'
+  AND ISNULL(s.program_name, '') NOT LIKE '%WaitDash%'
 ORDER BY r.total_elapsed_time DESC`
 
 const queryServerInfo = `
@@ -344,9 +388,9 @@ SELECT
     @@VERSION,
     CAST(SERVERPROPERTY('Edition') AS nvarchar(256)),
     CAST(SERVERPROPERTY('ProductLevel') AS nvarchar(50)),
-    CAST(ISNULL(SERVERPROPERTY('ProductUpdateLevel'),'') AS nvarchar(50)),
-    CAST(ISNULL(SERVERPROPERTY('LicenseType'),'Disabled') AS nvarchar(50)),
-    CAST(physical_memory_kb/1024/1024 AS int),
+    CAST(ISNULL(SERVERPROPERTY('ProductUpdateLevel'), '') AS nvarchar(50)),
+    CAST(ISNULL(SERVERPROPERTY('LicenseType'), 'Disabled') AS nvarchar(50)),
+    CAST(physical_memory_kb / 1024 / 1024 AS int),
     cpu_count,
     sqlserver_start_time,
     GETDATE()
@@ -354,11 +398,13 @@ FROM sys.dm_os_sys_info`
 
 const queryBlocking = `
 SELECT
-    r.session_id, r.blocking_session_id,
-    ISNULL(r.wait_type,''), ISNULL(r.wait_resource,''),
+    r.session_id,
+    r.blocking_session_id,
+    ISNULL(r.wait_type, ''),
+    ISNULL(r.wait_resource, ''),
     r.wait_time,
-    ISNULL(SUBSTRING(ISNULL(st.text,''),1,500),''),
-    ISNULL(SUBSTRING(ISNULL(st2.text,''),1,500),'')
+    ISNULL(SUBSTRING(ISNULL(st.text, ''), 1, 500), ''),
+    ISNULL(SUBSTRING(ISNULL(st2.text, ''), 1, 500), '')
 FROM sys.dm_exec_requests r
 LEFT JOIN sys.dm_exec_requests r2 ON r.blocking_session_id = r2.session_id
 OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) st
@@ -368,16 +414,16 @@ ORDER BY r.wait_time DESC`
 
 const queryDeadlocks = `
 SELECT TOP 20
-    xdr.value('@timestamp','datetime'),
+    xdr.value('@timestamp', 'datetime'),
     CAST(xdr.query('.') AS nvarchar(max))
 FROM (
     SELECT CAST(target_data AS xml) AS target_data
     FROM sys.dm_xe_session_targets t
     JOIN sys.dm_xe_sessions s ON s.address = t.event_session_address
-    WHERE s.name='system_health' AND t.target_name='ring_buffer'
+    WHERE s.name = 'system_health' AND t.target_name = 'ring_buffer'
 ) d
 CROSS APPLY target_data.nodes('//RingBufferTarget/event[@name="xml_deadlock_report"]') AS x(xdr)
-ORDER BY xdr.value('@timestamp','datetime') DESC`
+ORDER BY xdr.value('@timestamp', 'datetime') DESC`
 
 // ─────────────────────────────────────────────
 // Fetch helpers
@@ -479,7 +525,6 @@ func fetchOverview(st *ServerState, waits []WaitStat, active []ActiveRequest) (O
 	}
 	ov.UptimeHours = ov.CurrentTime.Sub(ov.StartTime).Hours()
 
-	// Max server memory
 	var maxMem int64
 	if err := st.db.QueryRow(`SELECT CAST(value_in_use AS bigint) FROM sys.configurations WHERE name='max server memory (MB)'`).Scan(&maxMem); err == nil {
 		ov.MaxServerMemMB = maxMem
@@ -585,9 +630,9 @@ func buildRecommendations(waits []WaitStat, ov Overview) []Recommendation {
 		case wt == "RESOURCE_SEMAPHORE" && !seen["mem"]:
 			seen["mem"] = true
 			rec = &Recommendation{Severity: "high", Category: "Memory", Message: "RESOURCE_SEMAPHORE — queries waiting for memory grants. Check for large sorts/hashes, missing indexes causing spills."}
-		case (wt == "CXPACKET" || wt == "CXCONSUMER") && !seen["par"]:
+		case (wt == "CXPACKET") && !seen["par"]:
 			seen["par"] = true
-			rec = &Recommendation{Severity: "medium", Category: "Parallelism", Message: fmt.Sprintf("%s — parallelism overhead. Review MAXDOP and Cost Threshold for Parallelism.", w.WaitType)}
+			rec = &Recommendation{Severity: "medium", Category: "Parallelism", Message: "CXPACKET — parallelism overhead. Review MAXDOP and Cost Threshold for Parallelism. Note: CXCONSUMER alone is usually benign."}
 		case strings.HasPrefix(wt, "LCK_M_") && !seen["lck"]:
 			seen["lck"] = true
 			rec = &Recommendation{Severity: "high", Category: "Locking", Message: fmt.Sprintf("%s — lock contention. Review isolation levels and long-running transactions.", w.WaitType)}
@@ -665,8 +710,6 @@ func handleAddServer(w http.ResponseWriter, r *http.Request) {
 	if sc.Port == 0 {
 		sc.Port = 1433
 	}
-
-	// Test connection
 	connStr := buildConnString(sc)
 	db, err := sql.Open("sqlserver", connStr)
 	if err != nil {
@@ -681,7 +724,6 @@ func handleAddServer(w http.ResponseWriter, r *http.Request) {
 	}
 	db.Close()
 
-	// Save
 	found := false
 	for i, s := range globalConfig.Servers {
 		if s.Name == sc.Name {
@@ -759,9 +801,9 @@ func handleAllData(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if err.Error() == "no_servers" {
 			jsonResponse(w, map[string]interface{}{
-				"no_servers":       true,
+				"no_servers":        true,
 				"available_servers": []string{},
-				"current_server":   "",
+				"current_server":    "",
 			})
 			return
 		}
