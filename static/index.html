@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WaitDash — SQL Server Wait Statistics</title>
+<title>WaitDash v0.4 — SQL Server Wait Statistics</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -22,7 +22,7 @@
       </div>
       <div class="form-row">
         <label>Host / IP</label>
-        <input id="f-host" type="text" placeholder="e.g. sql01.domain.local or 192.168.1.10" autocomplete="off">
+        <input id="f-host" type="text" placeholder="e.g. sql01.domain.local" autocomplete="off">
       </div>
       <div class="form-row two-col">
         <div>
@@ -87,12 +87,16 @@
   </div>
 </div>
 
+<!-- ─── COPY TOAST ────────────────────────────── -->
+<div id="copy-toast" class="copy-toast hidden">✓ Copied</div>
+
 <!-- ─── HEADER ────────────────────────────────── -->
 <header id="header">
   <div class="header-left">
     <div class="logo">
       <span class="logo-icon">⚡</span>
       <span class="logo-text">WaitDash</span>
+      <span class="logo-ver">v0.4</span>
       <span class="logo-by">by DBO Dominik Böttger · powered by Claude.AI</span>
     </div>
   </div>
@@ -116,19 +120,20 @@
   </div>
 
   <div class="header-right">
-    <div id="health-ampel" class="health-ampel" title="Instance Health">
+    <!-- Health Ampel with tooltip -->
+    <div id="health-ampel" class="health-ampel" id="health-ampel-wrap">
       <div class="ampel-light" id="amp-red"></div>
       <div class="ampel-light" id="amp-yellow"></div>
       <div class="ampel-light" id="amp-green"></div>
+      <div class="ampel-tooltip" id="ampel-tooltip"></div>
     </div>
 
     <div class="server-switcher" id="server-switcher-wrap">
-      <select id="server-select" title="Switch target server"></select>
+      <select id="server-select"></select>
       <button class="btn-icon" id="remove-server-btn" title="Remove selected server">✕</button>
     </div>
 
     <button class="btn-add-server" id="add-server-btn">+ Add Server</button>
-
     <button class="btn-theme" id="theme-toggle" title="Toggle Light/Dark">🌙</button>
 
     <div class="refresh-control">
@@ -169,20 +174,53 @@
   </div>
 </section>
 
-<!-- ─── CHARTS ────────────────────────────────── -->
+<!-- ─── CHARTS ROW ────────────────────────────── -->
 <section class="charts-row">
-  <div class="chart-card">
-    <div class="chart-title">Wait Category Distribution (Delta)</div>
-    <canvas id="chart-category" height="180"></canvas>
+
+  <!-- Stacked bar: Wait Category Distribution -->
+  <div class="chart-card chart-card-wide">
+    <div class="chart-header">
+      <div class="chart-title">Wait Category Distribution (Delta)</div>
+    </div>
+    <div id="cat-stacked-bar" class="stacked-bar-wrap">
+      <div class="stacked-bar" id="stacked-bar-inner"></div>
+      <div class="stacked-legend" id="stacked-legend"></div>
+    </div>
   </div>
-  <div class="chart-card">
-    <div class="chart-title">Top 10 Delta Waits (ms)</div>
-    <canvas id="chart-topwaits" height="180"></canvas>
+
+  <!-- Top 10 Delta Waits — HTML table-style bars -->
+  <div class="chart-card chart-card-wide">
+    <div class="chart-header">
+      <div class="chart-title">Top 10 Delta Waits (ms)</div>
+      <label class="toggle-label">
+        <input type="checkbox" id="show-other-toggle"> Show Other
+      </label>
+    </div>
+    <div id="top-waits-bars" class="top-waits-bars"></div>
   </div>
+
+  <!-- Signal vs Resource -->
   <div class="chart-card">
     <div class="chart-title">Signal vs Resource Waits</div>
-    <canvas id="chart-signal" height="180"></canvas>
+    <div id="signal-res-wrap" class="signal-res-wrap">
+      <div class="signal-res-bar-wrap">
+        <div class="signal-res-label">Signal (CPU)</div>
+        <div class="signal-res-track">
+          <div class="signal-res-fill signal-fill" id="sig-fill"></div>
+        </div>
+        <div class="signal-res-val" id="sig-val">—</div>
+      </div>
+      <div class="signal-res-bar-wrap">
+        <div class="signal-res-label">Resource (I/O etc.)</div>
+        <div class="signal-res-track">
+          <div class="signal-res-fill resource-fill" id="res-fill"></div>
+        </div>
+        <div class="signal-res-val" id="res-val">—</div>
+      </div>
+      <div class="signal-res-pct" id="sig-pct-label">—</div>
+    </div>
   </div>
+
 </section>
 
 <!-- ─── TABS ──────────────────────────────────── -->
@@ -190,79 +228,121 @@
   <div class="tab-bar">
     <button class="tab-btn active" data-tab="delta-waits">Delta Waits</button>
     <button class="tab-btn" data-tab="cumulative-waits">Cumulative Waits</button>
-    <button class="tab-btn" data-tab="active-requests">Active Requests</button>
-    <button class="tab-btn" data-tab="blocking">Blocking</button>
+    <button class="tab-btn" data-tab="active-requests">
+      Active Requests
+      <span class="tab-pause-btn hidden" id="pause-active" title="Pause refresh">⏸</span>
+    </button>
+    <button class="tab-btn" data-tab="blocking">
+      Blocking
+      <span class="tab-pause-btn hidden" id="pause-blocking" title="Pause refresh">⏸</span>
+    </button>
     <button class="tab-btn" data-tab="recommendations">Recommendations</button>
     <button class="tab-btn" data-tab="deadlocks">Deadlocks</button>
   </div>
 
+  <!-- Delta Waits -->
   <div class="tab-content active" id="tab-delta-waits">
-    <div class="table-note">Instance-level waits (sys.dm_os_wait_stats) — not per-database. Sorted by delta in this refresh interval. <strong>Click any wait type for details.</strong></div>
+    <div class="table-note">Instance-level waits — not per-database. Sorted by delta. <strong>Click wait type for details. Click any cell to copy value.</strong></div>
     <div class="table-wrapper">
-      <table id="tbl-delta-waits">
+      <table id="tbl-delta-waits" class="resizable-table">
         <thead><tr>
-          <th>Wait Type</th><th>Category</th><th>Delta Wait (ms)</th>
-          <th>Delta Tasks</th><th>Avg Wait (ms)</th><th>Max Wait (ms)</th><th>% of Total</th>
+          <th data-sort="wait_type">Wait Type <span class="sort-icon">⇅</span></th>
+          <th data-sort="category">Category <span class="sort-icon">⇅</span></th>
+          <th data-sort="delta_wait_time_ms" class="sorted-desc">Delta Wait (ms) <span class="sort-icon">↓</span></th>
+          <th data-sort="delta_tasks_count">Delta Tasks <span class="sort-icon">⇅</span></th>
+          <th data-sort="avg_wait_ms">Avg Wait (ms) <span class="sort-icon">⇅</span></th>
+          <th data-sort="max_wait_time_ms">Max Wait (ms) <span class="sort-icon">⇅</span></th>
+          <th data-sort="percent_of_total">% of Total <span class="sort-icon">⇅</span></th>
         </tr></thead>
         <tbody></tbody>
       </table>
     </div>
   </div>
 
+  <!-- Cumulative Waits -->
   <div class="tab-content" id="tab-cumulative-waits">
-    <div class="table-note">Cumulative since last SQL Server restart or manual reset. <strong>Click any wait type for details.</strong></div>
+    <div class="table-note">Cumulative since last SQL Server restart. <strong>Click wait type for details. Click any cell to copy.</strong></div>
     <div class="table-wrapper">
-      <table id="tbl-cumulative-waits">
+      <table id="tbl-cumulative-waits" class="resizable-table">
         <thead><tr>
-          <th>Wait Type</th><th>Category</th><th>Total Wait (ms)</th><th>Tasks Count</th>
-          <th>Signal Wait (ms)</th><th>Resource Wait (ms)</th><th>Avg Wait (ms)</th>
-          <th>Max Wait (ms)</th><th>% of Total</th>
+          <th data-sort="wait_type">Wait Type <span class="sort-icon">⇅</span></th>
+          <th data-sort="category">Category <span class="sort-icon">⇅</span></th>
+          <th data-sort="wait_time_ms" class="sorted-desc">Total Wait (ms) <span class="sort-icon">↓</span></th>
+          <th data-sort="waiting_tasks_count">Tasks Count <span class="sort-icon">⇅</span></th>
+          <th data-sort="signal_wait_time_ms">Signal Wait (ms) <span class="sort-icon">⇅</span></th>
+          <th data-sort="resource_wait_ms">Resource Wait (ms) <span class="sort-icon">⇅</span></th>
+          <th data-sort="avg_wait_ms">Avg Wait (ms) <span class="sort-icon">⇅</span></th>
+          <th data-sort="max_wait_time_ms">Max Wait (ms) <span class="sort-icon">⇅</span></th>
+          <th data-sort="percent_of_total">% of Total <span class="sort-icon">⇅</span></th>
         </tr></thead>
         <tbody></tbody>
       </table>
     </div>
   </div>
 
+  <!-- Active Requests -->
   <div class="tab-content" id="tab-active-requests">
-    <div class="table-note">Active user requests currently executing (excluding sleeping sessions and WaitDash itself).</div>
+    <div class="table-note">
+      Active user requests (excluding sleeping & WaitDash). <strong>Click any cell to copy.</strong>
+      <span id="active-paused-badge" class="paused-badge hidden">⏸ PAUSED</span>
+    </div>
     <div class="table-wrapper">
-      <table id="tbl-active">
+      <table id="tbl-active" class="resizable-table">
         <thead><tr>
-          <th>SPID</th><th>Status</th><th>Wait Type</th><th>Wait (ms)</th>
-          <th>Blocking</th><th>Elapsed (ms)</th><th>CPU (ms)</th><th>Logical Reads</th>
-          <th>Database</th><th>Login</th><th>Host</th><th>SQL Preview</th>
+          <th data-sort="session_id">SPID <span class="sort-icon">⇅</span></th>
+          <th data-sort="status">Status <span class="sort-icon">⇅</span></th>
+          <th data-sort="wait_type">Wait Type <span class="sort-icon">⇅</span></th>
+          <th data-sort="wait_time_ms">Wait (ms) <span class="sort-icon">⇅</span></th>
+          <th data-sort="blocking_session_id">Blocking <span class="sort-icon">⇅</span></th>
+          <th data-sort="total_elapsed_ms">Elapsed (ms) <span class="sort-icon">⇅</span></th>
+          <th data-sort="cpu_time">CPU (ms) <span class="sort-icon">⇅</span></th>
+          <th data-sort="logical_reads">Logical Reads <span class="sort-icon">⇅</span></th>
+          <th data-sort="database_name">Database <span class="sort-icon">⇅</span></th>
+          <th data-sort="login_name">Login <span class="sort-icon">⇅</span></th>
+          <th data-sort="host_name">Host <span class="sort-icon">⇅</span></th>
+          <th data-sort="sql_text">SQL Preview <span class="sort-icon">⇅</span></th>
         </tr></thead>
         <tbody></tbody>
       </table>
     </div>
   </div>
 
+  <!-- Blocking -->
   <div class="tab-content" id="tab-blocking">
-    <div class="table-note">Sessions actively blocked by another session.</div>
+    <div class="table-note">
+      Sessions actively blocked. <strong>Click any cell to copy.</strong>
+      <span id="blocking-paused-badge" class="paused-badge hidden">⏸ PAUSED</span>
+    </div>
     <div class="table-wrapper">
-      <table id="tbl-blocking">
+      <table id="tbl-blocking" class="resizable-table">
         <thead><tr>
-          <th>Blocked SPID</th><th>Blocking SPID</th><th>Wait Type</th>
-          <th>Wait Resource</th><th>Wait (ms)</th><th>Blocked SQL</th><th>Blocking SQL</th>
+          <th data-sort="blocked_session_id">Blocked SPID <span class="sort-icon">⇅</span></th>
+          <th data-sort="blocking_session_id">Blocking SPID <span class="sort-icon">⇅</span></th>
+          <th data-sort="wait_type">Wait Type <span class="sort-icon">⇅</span></th>
+          <th data-sort="wait_resource">Wait Resource <span class="sort-icon">⇅</span></th>
+          <th data-sort="wait_time_ms">Wait (ms) <span class="sort-icon">⇅</span></th>
+          <th data-sort="blocked_sql">Blocked SQL <span class="sort-icon">⇅</span></th>
+          <th data-sort="blocking_sql">Blocking SQL <span class="sort-icon">⇅</span></th>
         </tr></thead>
         <tbody></tbody>
       </table>
     </div>
   </div>
 
+  <!-- Recommendations -->
   <div class="tab-content" id="tab-recommendations">
     <div id="recs-container"></div>
   </div>
 
+  <!-- Deadlocks -->
   <div class="tab-content" id="tab-deadlocks">
     <div class="table-note">Deadlock events from system_health extended event session (last 20).</div>
     <div id="deadlocks-container"></div>
   </div>
 </section>
 
-<!-- ─── FOOTER ────────────────────────────────── -->
 <footer class="footer">
-  <span>WaitDash · DBO Dominik Böttger · powered by Claude.AI</span>
+  <span>WaitDash v0.4 · DBO Dominik Böttger · powered by Claude.AI</span>
   <span id="last-refresh">Never refreshed</span>
 </footer>
 
