@@ -20,10 +20,6 @@ import (
 //go:embed static/*
 var staticFiles embed.FS
 
-// ─────────────────────────────────────────────
-// Config
-// ─────────────────────────────────────────────
-
 type ServerConfig struct {
 	Name     string `json:"name"`
 	Host     string `json:"host"`
@@ -75,10 +71,6 @@ func saveConfig() error {
 	return os.WriteFile(configFilePath, data, 0644)
 }
 
-// ─────────────────────────────────────────────
-// Wait categories
-// ─────────────────────────────────────────────
-
 func categorizeWait(waitType string) string {
 	wt := strings.ToUpper(waitType)
 	switch {
@@ -104,10 +96,6 @@ func categorizeWait(waitType string) string {
 		return "Other"
 	}
 }
-
-// ─────────────────────────────────────────────
-// Data types
-// ─────────────────────────────────────────────
 
 type WaitStat struct {
 	WaitType          string  `json:"wait_type"`
@@ -153,30 +141,37 @@ type BlockingChain struct {
 	BlockingSQL       string `json:"blocking_sql"`
 }
 
+type HealthReason struct {
+	Level   string `json:"level"`
+	Reasons []string `json:"reasons"`
+}
+
 type Overview struct {
-	ServerName         string    `json:"server_name"`
-	SQLVersion         string    `json:"sql_version"`
-	Edition            string    `json:"edition"`
-	ProductLevel       string    `json:"product_level"`
-	ProductUpdate      string    `json:"product_update"`
-	LicenseType        string    `json:"license_type"`
-	PhysicalMemGB      int       `json:"physical_mem_gb"`
-	LogicalCPUs        int       `json:"logical_cpus"`
-	MaxServerMemMB     int64     `json:"max_server_mem_mb"`
-	StartTime          time.Time `json:"start_time"`
-	CurrentTime        time.Time `json:"current_time"`
-	UptimeHours        float64   `json:"uptime_hours"`
-	SignalWaitPct      float64   `json:"signal_wait_pct"`
-	TotalWaitMs        int64     `json:"total_wait_ms"`
-	SignalWaitMs       int64     `json:"signal_wait_ms"`
-	ResourceWaitMs     int64     `json:"resource_wait_ms"`
-	BlockedCount       int       `json:"blocked_count"`
-	ActiveRequestCount int       `json:"active_request_count"`
-	TopWaitCategory    string    `json:"top_wait_category"`
-	CPUPressure        bool      `json:"cpu_pressure"`
-	HealthStatus       string    `json:"health_status"`
-	AvailableServers   []string  `json:"available_servers"`
-	CurrentServer      string    `json:"current_server"`
+	ServerName         string       `json:"server_name"`
+	SQLVersion         string       `json:"sql_version"`
+	Edition            string       `json:"edition"`
+	ProductLevel       string       `json:"product_level"`
+	ProductUpdate      string       `json:"product_update"`
+	LicenseType        string       `json:"license_type"`
+	PhysicalMemGB      int          `json:"physical_mem_gb"`
+	LogicalCPUs        int          `json:"logical_cpus"`
+	MaxServerMemMB     int64        `json:"max_server_mem_mb"`
+	StartTime          time.Time    `json:"start_time"`
+	CurrentTime        time.Time    `json:"current_time"`
+	UptimeHours        float64      `json:"uptime_hours"`
+	SignalWaitPct      float64      `json:"signal_wait_pct"`
+	TotalWaitMs        int64        `json:"total_wait_ms"`
+	SignalWaitMs       int64        `json:"signal_wait_ms"`
+	ResourceWaitMs     int64        `json:"resource_wait_ms"`
+	BlockedCount       int          `json:"blocked_count"`
+	ActiveRequestCount int          `json:"active_request_count"`
+	TopWaitCategory    string       `json:"top_wait_category"`
+	CPUPressure        bool         `json:"cpu_pressure"`
+	HealthStatus       string       `json:"health_status"`
+	HealthReasons      []string     `json:"health_reasons"`
+	AvailableServers   []string     `json:"available_servers"`
+	CurrentServer      string       `json:"current_server"`
+	CategoryTotals     map[string]int64 `json:"category_totals"`
 }
 
 type Recommendation struct {
@@ -189,10 +184,6 @@ type Deadlock struct {
 	Timestamp  string `json:"timestamp"`
 	XMLPreview string `json:"xml_preview"`
 }
-
-// ─────────────────────────────────────────────
-// State
-// ─────────────────────────────────────────────
 
 type WaitSnapshot map[string]WaitStat
 
@@ -209,10 +200,6 @@ var (
 	serverStates = map[string]*ServerState{}
 	activeServer string
 )
-
-// ─────────────────────────────────────────────
-// DB connection
-// ─────────────────────────────────────────────
 
 func buildConnString(sc ServerConfig) string {
 	host := sc.Host
@@ -288,53 +275,56 @@ func currentState() (*ServerState, error) {
 }
 
 // ─────────────────────────────────────────────
-// SQLskills Paul Randal Goldstandard Exclusion List
+// SQLskills Goldstandard + Extended exclusion list
 // ─────────────────────────────────────────────
-
 const queryWaits = `
 SELECT wait_type, waiting_tasks_count, wait_time_ms, max_wait_time_ms, signal_wait_time_ms
 FROM sys.dm_os_wait_stats
 WHERE wait_type NOT IN (
+    N'BACKUPBUFFER', N'BACKUPIO', N'BACKUPTHREAD',
     N'BROKER_EVENTHANDLER', N'BROKER_RECEIVE_WAITFOR', N'BROKER_TASK_STOP',
-    N'BROKER_TO_FLUSH', N'BROKER_TRANSMITTER', N'CHECKPOINT_QUEUE', N'CHKPT',
+    N'BROKER_TO_FLUSH', N'BROKER_TRANSMITTER',
+    N'CHECKPOINT_QUEUE', N'CHKPT',
     N'CLR_AUTO_EVENT', N'CLR_MANUAL_EVENT', N'CLR_SEMAPHORE',
     N'CXCONSUMER',
     N'DBMIRROR_DBM_EVENT', N'DBMIRROR_EVENTS_QUEUE', N'DBMIRROR_WORKER_QUEUE',
     N'DBMIRRORING_CMD', N'DIRTY_PAGE_POLL', N'DISPATCHER_QUEUE_SEMAPHORE',
-    N'EXECSYNC', N'FSAGENT', N'FT_IFTS_SCHEDULER_IDLE_WAIT', N'FT_IFTSHC_MUTEX',
+    N'EXECSYNC', N'FSAGENT',
+    N'FT_IFTS_SCHEDULER_IDLE_WAIT', N'FT_IFTSHC_MUTEX',
     N'HADR_CLUSAPI_CALL', N'HADR_FILESTREAM_IOMGR_IOCOMPLETION',
     N'HADR_WORK_QUEUE', N'HADR_TRANSPORT_DBRLIST',
     N'IMPPROV_IOWAIT', N'INTERNAL_TESTING',
     N'IO_QUEUE_LIMIT', N'IO_RETRY',
     N'LAZYWRITER_SLEEP', N'LOGMGR_QUEUE', N'LOGMGR_RESERVE_APPEND',
-    N'LOWFAIL_MEMMGR_QUEUE',
-    N'MEMORY_ALLOCATION_EXT',
+    N'LOWFAIL_MEMMGR_QUEUE', N'MEMORY_ALLOCATION_EXT',
     N'MSQL_DQ', N'MSQL_XACT_MGR_MUTEX', N'MSQL_XACT_MUTEX',
     N'MSQL_XP', N'MSSEARCH',
     N'NET_WAITFOR_PACKET', N'NODE_CACHE_MUTEX',
+    N'OLEDB',
     N'ONDEMAND_TASK_MANAGER',
     N'PARALLEL_REDO_DRAIN_WORKER', N'PARALLEL_REDO_LOG_CACHE',
     N'PARALLEL_REDO_TRAN_LIST', N'PARALLEL_REDO_WORKER_SYNC',
     N'PARALLEL_REDO_WORKER_WAIT_WORK',
+    N'PREEMPTIVE_XE_DISPATCHER',
     N'PRINT_ROLLBACK_PROGRESS',
+    N'PVS_PREALLOCATE',
     N'PWAIT_ALL_COMPONENTS_INITIALIZED', N'PWAIT_DIRECTLOGCONSUMER_GETNEXT',
     N'QDS_ASYNC_QUEUE', N'QDS_CLEANUP_STALE_QUERIES_TASK_MAIN_LOOP_SLEEP',
     N'QDS_PERSIST_TASK_MAIN_LOOP_SLEEP', N'QDS_SHUTDOWN_QUEUE',
-    N'REDO_THREAD_PENDING_WORK',
-    N'REQUEST_FOR_DEADLOCK_SEARCH',
+    N'REDO_THREAD_PENDING_WORK', N'REQUEST_FOR_DEADLOCK_SEARCH',
     N'RESOURCE_QUEUE',
     N'SERVER_IDLE_CHECK',
+    N'SLEEP_BPOOL_FLUSH',
     N'SLEEP_DBSTARTUP', N'SLEEP_DCOMSTARTUP', N'SLEEP_MASTERDBREADY',
     N'SLEEP_MASTERMDREADY', N'SLEEP_MASTERUPGRADED', N'SLEEP_MSDBSTARTUP',
     N'SLEEP_SYSTEMTASK', N'SLEEP_TASK', N'SLEEP_TEMPDBSTARTUP',
-    N'SNI_HTTP_ACCEPT',
-    N'SOS_WORK_DISPATCHER',
+    N'SNI_HTTP_ACCEPT', N'SOS_WORK_DISPATCHER',
     N'SP_SERVER_DIAGNOSTICS_SLEEP',
     N'SQLTRACE_BUFFER_FLUSH', N'SQLTRACE_INCREMENTAL_FLUSH_SLEEP',
     N'SQLTRACE_WAIT_ENTRIES',
     N'WAIT_XTP_OFFLINE_CKPT_NEW_LOG',
     N'WAITFOR', N'WAITFOR_TASKSHUTDOWN',
-    N'WAIT_XTP_HOST_WAIT', N'WAIT_XTP_OFFLINE_CKPT_NEW_LOG',
+    N'WAIT_XTP_HOST_WAIT',
     N'XE_DISPATCHER_JOIN', N'XE_DISPATCHER_WAIT',
     N'XE_TIMER_EVENT', N'XE_TIMER_MUTEX', N'XE_TIMER_TASK_DONE',
     N'XIO_CREDENTIAL_MGR_WAITSFOR'
@@ -342,21 +332,14 @@ WHERE wait_type NOT IN (
 AND wait_time_ms > 0
 ORDER BY wait_time_ms DESC`
 
-// Fixed active requests query - catches all non-sleeping user requests
 const queryActive = `
 SELECT
-    r.session_id,
-    r.status,
-    r.command,
+    r.session_id, r.status, r.command,
     ISNULL(r.wait_type, '') AS wait_type,
     r.wait_time,
     ISNULL(r.wait_resource, '') AS wait_resource,
     ISNULL(r.blocking_session_id, 0) AS blocking_session_id,
-    r.cpu_time,
-    r.logical_reads,
-    r.reads,
-    r.writes,
-    r.total_elapsed_time,
+    r.cpu_time, r.logical_reads, r.reads, r.writes, r.total_elapsed_time,
     ISNULL(DB_NAME(r.database_id), '') AS database_name,
     ISNULL(s.host_name, '') AS host_name,
     ISNULL(s.login_name, '') AS login_name,
@@ -365,12 +348,10 @@ SELECT
         SUBSTRING(
             ISNULL(st.text, ''),
             (r.statement_start_offset / 2) + 1,
-            (
-                CASE r.statement_end_offset
-                    WHEN -1 THEN DATALENGTH(ISNULL(st.text, ''))
-                    ELSE r.statement_end_offset
-                END - r.statement_start_offset
-            ) / 2 + 1
+            (CASE r.statement_end_offset
+                WHEN -1 THEN DATALENGTH(ISNULL(st.text, ''))
+                ELSE r.statement_end_offset
+             END - r.statement_start_offset) / 2 + 1
         ), ''
     ) AS sql_text
 FROM sys.dm_exec_requests r
@@ -398,10 +379,8 @@ FROM sys.dm_os_sys_info`
 
 const queryBlocking = `
 SELECT
-    r.session_id,
-    r.blocking_session_id,
-    ISNULL(r.wait_type, ''),
-    ISNULL(r.wait_resource, ''),
+    r.session_id, r.blocking_session_id,
+    ISNULL(r.wait_type, ''), ISNULL(r.wait_resource, ''),
     r.wait_time,
     ISNULL(SUBSTRING(ISNULL(st.text, ''), 1, 500), ''),
     ISNULL(SUBSTRING(ISNULL(st2.text, ''), 1, 500), '')
@@ -424,10 +403,6 @@ FROM (
 ) d
 CROSS APPLY target_data.nodes('//RingBufferTarget/event[@name="xml_deadlock_report"]') AS x(xdr)
 ORDER BY xdr.value('@timestamp', 'datetime') DESC`
-
-// ─────────────────────────────────────────────
-// Fetch helpers
-// ─────────────────────────────────────────────
 
 func fetchWaits(st *ServerState) ([]WaitStat, error) {
 	st.mu.Lock()
@@ -530,13 +505,13 @@ func fetchOverview(st *ServerState, waits []WaitStat, active []ActiveRequest) (O
 		ov.MaxServerMemMB = maxMem
 	}
 
+	ov.CategoryTotals = map[string]int64{}
 	var totalWait, totalSignal int64
-	catTotals := map[string]int64{}
 	for _, w := range waits {
 		totalWait += w.WaitTimeMs
 		totalSignal += w.SignalWaitTimeMs
 		if w.DeltaWaitTimeMs > 0 {
-			catTotals[w.Category] += w.DeltaWaitTimeMs
+			ov.CategoryTotals[w.Category] += w.DeltaWaitTimeMs
 		}
 	}
 	ov.TotalWaitMs = totalWait
@@ -549,7 +524,7 @@ func fetchOverview(st *ServerState, waits []WaitStat, active []ActiveRequest) (O
 
 	var topCat string
 	var topVal int64
-	for cat, val := range catTotals {
+	for cat, val := range ov.CategoryTotals {
 		if val > topVal {
 			topVal = val
 			topCat = cat
@@ -567,6 +542,21 @@ func fetchOverview(st *ServerState, waits []WaitStat, active []ActiveRequest) (O
 	}
 	ov.ActiveRequestCount = len(active)
 
+	// Health status with detailed reasons
+	var reasons []string
+	if ov.BlockedCount > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d blocked session(s) detected", ov.BlockedCount))
+	}
+	if ov.CPUPressure {
+		reasons = append(reasons, fmt.Sprintf("Signal wait %% is %.1f%% (threshold: >25%%) — CPU pressure", ov.SignalWaitPct))
+	}
+	if ov.SignalWaitPct > 15 && !ov.CPUPressure {
+		reasons = append(reasons, fmt.Sprintf("Signal wait %% is %.1f%% (threshold: >15%%) — elevated CPU usage", ov.SignalWaitPct))
+	}
+	if ov.ActiveRequestCount > 20 {
+		reasons = append(reasons, fmt.Sprintf("%d active requests (threshold: >20)", ov.ActiveRequestCount))
+	}
+
 	switch {
 	case ov.BlockedCount > 0 || ov.CPUPressure:
 		ov.HealthStatus = "red"
@@ -574,7 +564,9 @@ func fetchOverview(st *ServerState, waits []WaitStat, active []ActiveRequest) (O
 		ov.HealthStatus = "yellow"
 	default:
 		ov.HealthStatus = "green"
+		reasons = append(reasons, "All metrics within normal thresholds")
 	}
+	ov.HealthReasons = reasons
 
 	for _, s := range globalConfig.Servers {
 		ov.AvailableServers = append(ov.AvailableServers, s.Name)
@@ -630,21 +622,21 @@ func buildRecommendations(waits []WaitStat, ov Overview) []Recommendation {
 		case wt == "RESOURCE_SEMAPHORE" && !seen["mem"]:
 			seen["mem"] = true
 			rec = &Recommendation{Severity: "high", Category: "Memory", Message: "RESOURCE_SEMAPHORE — queries waiting for memory grants. Check for large sorts/hashes, missing indexes causing spills."}
-		case (wt == "CXPACKET") && !seen["par"]:
+		case wt == "CXPACKET" && !seen["par"]:
 			seen["par"] = true
-			rec = &Recommendation{Severity: "medium", Category: "Parallelism", Message: "CXPACKET — parallelism overhead. Review MAXDOP and Cost Threshold for Parallelism. Note: CXCONSUMER alone is usually benign."}
+			rec = &Recommendation{Severity: "medium", Category: "Parallelism", Message: "CXPACKET — parallelism overhead. Review MAXDOP and Cost Threshold for Parallelism."}
 		case strings.HasPrefix(wt, "LCK_M_") && !seen["lck"]:
 			seen["lck"] = true
 			rec = &Recommendation{Severity: "high", Category: "Locking", Message: fmt.Sprintf("%s — lock contention. Review isolation levels and long-running transactions.", w.WaitType)}
 		case wt == "ASYNC_NETWORK_IO" && !seen["net"]:
 			seen["net"] = true
-			rec = &Recommendation{Severity: "medium", Category: "Network", Message: "ASYNC_NETWORK_IO — clients not consuming results fast enough. Check application-side result processing."}
+			rec = &Recommendation{Severity: "medium", Category: "Network", Message: "ASYNC_NETWORK_IO — clients not consuming results fast enough."}
 		case strings.HasPrefix(wt, "PAGELATCH_") && !seen["latch"]:
 			seen["latch"] = true
-			rec = &Recommendation{Severity: "medium", Category: "Latch", Message: "PAGELATCH — in-memory page latch contention. Check tempdb file count or hot page contention."}
+			rec = &Recommendation{Severity: "medium", Category: "Latch", Message: "PAGELATCH — in-memory page latch contention. Check tempdb file count."}
 		case wt == "THREADPOOL" && !seen["tp"]:
 			seen["tp"] = true
-			rec = &Recommendation{Severity: "high", Category: "CPU", Message: "THREADPOOL — worker thread exhaustion. Reduce concurrent connections or check for blocking chains."}
+			rec = &Recommendation{Severity: "high", Category: "CPU", Message: "THREADPOOL — worker thread exhaustion. Reduce concurrent connections or check blocking chains."}
 		}
 		if rec != nil {
 			recs = append(recs, *rec)
@@ -677,10 +669,6 @@ func fetchDeadlocks(st *ServerState) []Deadlock {
 	}
 	return result
 }
-
-// ─────────────────────────────────────────────
-// HTTP Handlers
-// ─────────────────────────────────────────────
 
 func jsonResponse(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -847,10 +835,6 @@ func handleConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ─────────────────────────────────────────────
-// Main
-// ─────────────────────────────────────────────
-
 func main() {
 	loadConfig()
 
@@ -877,7 +861,7 @@ func main() {
 	mux.Handle("/", http.FileServer(http.FS(staticFS)))
 
 	addr := fmt.Sprintf(":%d", globalConfig.ListenPort)
-	log.Printf("WaitDash → http://localhost%s", addr)
+	log.Printf("WaitDash v0.4 → http://localhost%s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
 	}
